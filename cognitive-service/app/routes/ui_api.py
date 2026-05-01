@@ -8,10 +8,22 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
+from app.lib.config_loader import DIMENSIONS
 from app.lib.db import get_conn
 from app.lib.vector_store import VECTOR_INDEX_PATH, get_store
 
 router = APIRouter(prefix="/ui/api")
+
+_DIM_INTERNAL_KEYS = {"_dir", "_prompt", "_rubric", "prompt_template"}
+
+
+@router.get("/dimensions")
+def list_dimensions():
+    return [
+        {k: v for k, v in dim.items() if k not in _DIM_INTERNAL_KEYS}
+        for dim in DIMENSIONS
+        if dim.get("enabled", True)
+    ]
 
 
 @router.get("/stats")

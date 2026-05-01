@@ -3,7 +3,9 @@ import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchEntries, fetchEntry, fetchEntryTrace, fetchMemos, processEntry, deleteEntry, revertEntry } from '@/api'
 import type { EntryDetail, TraceData, SliceFeature, Memo, SituationContext } from '@/types'
-import { DOMAIN_COLORS, OCEAN_NAMES, SCHWARTZ_NAMES, SCHWARTZ_COLORS } from '@/lib/constants'
+import { DOMAIN_COLORS, SCHWARTZ_COLORS } from '@/lib/constants'
+import { useDimensionSchemas, getDimSchema } from '@/lib/useDimensionSchemas'
+import type { DimensionSchema } from '@/types'
 import { fmtTime } from '@/lib/utils'
 import { RefreshCw, Cpu, Search, Trash2, ChevronRight, RotateCcw } from 'lucide-react'
 import { useConfirm } from '@/components/ui/ConfirmDialog'
@@ -348,6 +350,7 @@ function StatusBadge({ status }: { status: string }) {
 }
 
 function EntryDetailPanel({ detail, onTrace }: { detail: EntryDetail; onTrace: () => void }) {
+  const schemas = useDimensionSchemas()
   return (
     <div style={{ padding: '24px 28px', maxWidth: 720 }}>
       {/* Header */}
@@ -377,7 +380,7 @@ function EntryDetailPanel({ detail, onTrace }: { detail: EntryDetail; onTrace: (
         <div style={{ marginBottom: 24 }}>
           <div className="t-caption" style={{ marginBottom: 12 }}>切片分析</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {detail.features.map((f, i) => <FeatureBlock key={i} f={f} />)}
+            {detail.features.map((f, i) => <FeatureBlock key={i} f={f} schemas={schemas} />)}
           </div>
         </div>
       )}
@@ -411,45 +414,69 @@ function EntryDetailPanel({ detail, onTrace }: { detail: EntryDetail; onTrace: (
   )
 }
 
-function FeatureBlock({ f }: { f: SliceFeature }) {
-  const c = f.content_json as Record<string, unknown>
-  const confLabel = f.confidence != null ? ` · conf ${f.confidence.toFixed(2)}` : ''
-
-  if (f.dimension === 'ocean') return (
-    <div style={{ padding: '14px 16px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--border)' }}>
-      <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', marginBottom: 10 }}>OCEAN{confLabel}</div>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
-        {Object.entries(OCEAN_NAMES).map(([k, name]) => {
-          const v = (c[k] as Record<string, number> | undefined) || {}
-          const score = v.score ?? 50
-          return (
-            <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-              <span style={{ color: 'var(--accent)', fontWeight: 700, fontSize: 11, width: 14 }}>{k}</span>
-              <span style={{ color: 'var(--text3)', fontSize: 11, width: 52 }}>{name}</span>
-              <div className="bar-track"><div className="bar-fill" style={{ width: `${score}%`, background: 'var(--accent)' }} /></div>
-              <span style={{ color: 'var(--text2)', fontSize: 12, fontWeight: 600, width: 26, textAlign: 'right' }}>{Math.round(score)}</span>
-              <span style={{ color: 'var(--text3)', fontSize: 10, width: 30, textAlign: 'right' }}>{(v.confidence ?? 0).toFixed(1)}</span>
-            </div>
-          )
-        })}
-      </div>
+function ScoreBars({ schema, content, compact = false }: {
+  schema: DimensionSchema
+  content: Record<string, unknown>
+  compact?: boolean
+}) {
+  const entries: [string, string][] = schema.sub_dimensions?.length
+    ? schema.sub_dimensions.map(sd => [sd.key, sd.name])
+    : Object.keys(content).map(k => [k, k])
+  const sorted = schema.sort_by_score
+    ? [...entries].sort(([a], [b]) => ((content[b] as Record<string, number>)?.score ?? 0) - ((content[a] as Record<string, number>)?.score ?? 0))
+    : entries
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: compact ? 5 : 7 }}>
+      {sorted.map(([k, name], i) => {
+        const v = (content[k] as Record<string, number> | undefined) ?? {}
+        const score = v.score ?? 50
+        const color = SCHWARTZ_COLORS[i % SCHWARTZ_COLORS.length]
+        return (
+          <div key={k} style={{ display: 'flex', alignItems: 'center', gap: compact ? 8 : 10 }}>
+            <span style={{ color: 'var(--text3)', fontSize: compact ? 10 : 11, width: compact ? 80 : 88, flexShrink: 0 }}>{name}</span>
+            {compact
+              ? <div style={{ width: 80, height: 4, background: 'var(--surface3)', borderRadius: 2, overflow: 'hidden', flexShrink: 0 }}>
+                  <div style={{ height: '100%', width: `${score}%`, background: color, borderRadius: 2 }} />
+                </div>
+              : <div className="bar-track"><div className="bar-fill" style={{ width: `${score}%`, background: color }} /></div>
+            }
+            <span style={{ color: 'var(--text2)', fontSize: compact ? 10 : 12, fontWeight: 600, width: 26, textAlign: 'right' }}>{Math.round(score)}</span>
+            {!compact && <span style={{ color: 'var(--text3)', fontSize: 10, width: 30, textAlign: 'right' }}>{(v.confidence ?? 0).toFixed(1)}</span>}
+          </div>
+        )
+      })}
     </div>
   )
+}
 
-  if (f.dimension === 'schwartz') {
-    const sorted = Object.entries(c).filter(([, v]) => typeof v === 'object' && v !== null)
-      .sort(([, a], [, b]) => ((b as Record<string, number>).score ?? 0) - ((a as Record<string, number>).score ?? 0))
+function FeatureBlock({ f, schemas }: { f: SliceFeature; schemas: DimensionSchema[] }) {
+  const c = f.content_json as Record<string, unknown>
+  const schema = getDimSchema(schemas, f.dimension)
+  const fmt = schema?.summary_format ?? 'free'
+  const label = schema?.summary_label ?? f.dimension
+
+  if (fmt === 'scores' && schema) {
     return (
       <div style={{ padding: '14px 16px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', marginBottom: 10 }}>Schwartz 价值观{confLabel}</div>
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', marginBottom: 10 }}>{label}</div>
+        <ScoreBars schema={schema} content={c} />
+      </div>
+    )
+  }
+
+  if (fmt === 'key_value') {
+    const rows = Object.entries(c).filter(([, v]) => v && v !== 'null')
+    if (!rows.length) return null
+    return (
+      <div style={{ padding: '14px 16px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--border)' }}>
+        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', marginBottom: 10 }}>{label}</div>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {sorted.map(([k, v], i) => {
-            const score = (v as Record<string, number>).score ?? 50
+          {rows.map(([k, v]) => {
+            const val = typeof v === 'object' && v !== null && 'value' in v ? String((v as Record<string, unknown>).value) : String(v)
             return (
-              <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                <span style={{ color: 'var(--text3)', fontSize: 11, width: 68 }}>{SCHWARTZ_NAMES[k] || k}</span>
-                <div className="bar-track"><div className="bar-fill" style={{ width: `${score}%`, background: SCHWARTZ_COLORS[i % SCHWARTZ_COLORS.length] }} /></div>
-                <span style={{ color: 'var(--text2)', fontSize: 12, fontWeight: 600, width: 26, textAlign: 'right' }}>{Math.round(score)}</span>
+              <div key={k} style={{ display: 'flex', gap: 12, fontSize: 12 }}>
+                <span style={{ color: 'var(--text3)', width: 64, flexShrink: 0 }}>{k}</span>
+                <span style={{ color: 'var(--text)' }}>{val}</span>
               </div>
             )
           })}
@@ -458,26 +485,11 @@ function FeatureBlock({ f }: { f: SliceFeature }) {
     )
   }
 
-  if (f.dimension === 'facts') {
-    const FACT_LABELS: Record<string, string> = { name: '姓名', age: '年龄', gender: '性别', occupation: '职业', marital_status: '婚姻', city: '城市', primary_project: '主项目' }
-    const rows = Object.entries(c).filter(([, v]) => v && v !== 'null')
-    if (!rows.length) return null
-    return (
-      <div style={{ padding: '14px 16px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', marginBottom: 10 }}>基本信息</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {rows.map(([k, v]) => (
-            <div key={k} style={{ display: 'flex', gap: 12, fontSize: 12 }}>
-              <span style={{ color: 'var(--text3)', width: 64, flexShrink: 0 }}>{FACT_LABELS[k] || k}</span>
-              <span style={{ color: 'var(--text)' }}>{String(v)}</span>
-            </div>
-          ))}
-        </div>
-      </div>
-    )
-  }
-
-  return <div style={{ fontSize: 11, color: 'var(--text3)', padding: '8px 12px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)' }}>{f.dimension} · conf {f.confidence?.toFixed(2)}</div>
+  return (
+    <div style={{ fontSize: 11, color: 'var(--text3)', padding: '8px 12px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)' }}>
+      {label} · {JSON.stringify(c).substring(0, 120)}
+    </div>
+  )
 }
 
 const FRAME_LABEL: Record<string, string> = { present: '当下', retrospective: '回顾', hypothetical: '假设' }
@@ -708,61 +720,27 @@ function DPill({ domain }: { domain: string }) {
 }
 
 function SliceContent({ slice }: { slice: NonNullable<TraceData['trace']>['slice'] }) {
+  const schemas = useDimensionSchemas()
   if (!slice || !Object.keys(slice).length) return <TEmpty text="无切片数据" />
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
-      {Object.entries(slice).map(([dim, data]) => (
-        <div key={dim}>
-          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text3)', marginBottom: 8, textTransform: 'uppercase' }}>
-            {dim} <span style={{ fontWeight: 400 }}>conf={data.confidence?.toFixed(2)}<FieldHint field="conf" /></span>
-          </div>
-          <SliceDim dim={dim} content={data.content as Record<string, unknown>} />
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function SliceDim({ dim, content }: { dim: string; content: Record<string, unknown> }) {
-  if (dim === 'ocean') return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-      {Object.entries(OCEAN_NAMES).map(([k, name]) => {
-        const v = (content[k] as Record<string, number> | undefined) || {}
-        const s = v.score ?? 50
+      {Object.entries(slice).map(([dim, data]) => {
+        const schema = getDimSchema(schemas, dim)
+        const label = schema?.summary_label ?? dim
         return (
-          <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            <span style={{ color: 'var(--accent)', fontWeight: 700, width: 14, fontSize: 10 }}>{k}</span>
-            <span style={{ color: 'var(--text3)', width: 60, fontSize: 10 }}>{name}</span>
-            <div style={{ width: 80, height: 4, background: 'var(--surface3)', borderRadius: 2, overflow: 'hidden', flexShrink: 0 }}>
-              <div style={{ height: '100%', width: `${s}%`, background: 'var(--accent)', borderRadius: 2 }} />
+          <div key={dim}>
+            <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text3)', marginBottom: 8, textTransform: 'uppercase' }}>
+              {label} <span style={{ fontWeight: 400 }}>conf={data.confidence?.toFixed(2)}<FieldHint field="conf" /></span>
             </div>
-            <span style={{ fontSize: 10, color: 'var(--text2)', marginLeft: 4 }}>{Math.round(s)}</span>
+            {schema?.summary_format === 'scores'
+              ? <ScoreBars schema={schema} content={data.content as Record<string, unknown>} compact />
+              : <div style={{ color: 'var(--text2)', fontFamily: 'monospace', fontSize: 10, whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'auto' }}>{JSON.stringify(data.content, null, 2).substring(0, 300)}</div>
+            }
           </div>
         )
       })}
     </div>
   )
-  if (dim === 'schwartz') {
-    const sorted = Object.entries(content).filter(([, v]) => typeof v === 'object' && v !== null)
-      .sort(([, a], [, b]) => ((b as Record<string, number>).score ?? 0) - ((a as Record<string, number>).score ?? 0))
-    return (
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-        {sorted.slice(0, 5).map(([k, v], i) => {
-          const s = (v as Record<string, number>).score ?? 50
-          return (
-            <div key={k} style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ color: 'var(--text3)', width: 80, fontSize: 10 }}>{SCHWARTZ_NAMES[k] || k}</span>
-              <div style={{ width: 80, height: 4, background: 'var(--surface3)', borderRadius: 2, overflow: 'hidden', flexShrink: 0 }}>
-                <div style={{ height: '100%', width: `${s}%`, background: SCHWARTZ_COLORS[i % SCHWARTZ_COLORS.length], borderRadius: 2 }} />
-              </div>
-              <span style={{ fontSize: 10, color: 'var(--text2)', marginLeft: 4 }}>{Math.round(s)}</span>
-            </div>
-          )
-        })}
-      </div>
-    )
-  }
-  return <div style={{ color: 'var(--text2)', fontFamily: 'monospace', fontSize: 10, whiteSpace: 'pre-wrap', maxHeight: 120, overflow: 'auto' }}>{JSON.stringify(content, null, 2).substring(0, 300)}</div>
 }
 
 function ProfileDiffContent({ diff }: { diff: NonNullable<TraceData['trace']>['profile_diff'] }) {

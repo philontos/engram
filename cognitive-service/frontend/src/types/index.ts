@@ -1,3 +1,21 @@
+// ── Dimension Schemas ─────────────────────────────────────────────────────────
+
+export interface SubDimensionDef {
+  key: string
+  name: string
+}
+
+export interface DimensionSchema {
+  key: string
+  name: string
+  summary_format: 'scores' | 'key_value' | 'skip' | 'free'
+  summary_label: string
+  sort_by_score?: boolean
+  score_range?: [number, number]
+  sub_dimensions?: SubDimensionDef[]
+  enabled: boolean
+}
+
 // ── Entries ──────────────────────────────────────────────────────────────────
 
 export interface Entry {

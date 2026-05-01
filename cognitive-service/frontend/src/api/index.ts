@@ -1,5 +1,5 @@
 import type {
-  Entry, EntryDetail, GraphData, ProfileDimension,
+  Entry, EntryDetail, GraphData, ProfileDimension, DimensionSchema,
   QueryLogSummary, QueryLogDetail, Stats, TraceData, Memo,
 } from '@/types'
 
@@ -45,6 +45,7 @@ export const fetchGraph = (domain = '') =>
 
 // ── Profile ───────────────────────────────────────────────────────────────────
 export const fetchProfile = () => req<ProfileDimension[]>('/ui/api/profile')
+export const fetchDimensions = () => req<DimensionSchema[]>('/ui/api/dimensions')
 
 export type EvolutionPoint = { entry_id: number; date: string; score: number; confidence: number }
 export type ProfileEvolution = { ocean: Record<string, EvolutionPoint[]>; schwartz: Record<string, EvolutionPoint[]> }

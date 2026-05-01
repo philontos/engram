@@ -1,26 +1,26 @@
-# OCEAN 各维度评分依据
+# OCEAN Dimension Scoring Guide
 
-**开放性 O**：对新想法的探索欲、抽象联想能力、跨领域思维、审美敏感度、对惯例的挑战意愿
-**尽责性 C**：计划性、执行力、自律表现、对细节的关注、完成任务的持续性
-**外向性 E**：社交意愿、主动发起行为、表达欲望、从社交中获取能量、行动的积极性
-**宜人性 A**：对他人的关注与共情、合作意愿、冲突回避倾向、信任他人的程度
-**神经质 N**：焦虑程度、情绪波动频率、对压力的敏感性、负面情绪的强度与持续时间
+**Openness (O)**: Curiosity for new ideas, abstract thinking, cross-domain connections, aesthetic sensitivity, willingness to challenge conventions.
+**Conscientiousness (C)**: Planning, follow-through, self-discipline, attention to detail, persistence in completing tasks.
+**Extraversion (E)**: Social initiative, desire to engage others, expressiveness, drawing energy from social interaction, behavioral activation.
+**Agreeableness (A)**: Empathy and concern for others, cooperativeness, conflict avoidance, trust in people.
+**Neuroticism (N)**: Anxiety level, emotional volatility, sensitivity to stress, intensity and duration of negative affect.
 
-# 评分区间参考
+# Score ranges
 
-| 分值 | 含义 |
-|---|---|
-| 0–30  | 该特质表现极弱或呈现反向特质 |
-| 30–50 | 低于平均水平 |
-| 50–70 | 接近平均水平 |
-| 70–85 | 明显偏高，有清晰行为信号 |
-| 85+   | 极端表现，需要非常强的输入信号支撑 |
+| Score | Meaning |
+|-------|---------|
+| 0–30  | Trait is very weak or reversed |
+| 30–50 | Below average |
+| 50–70 | Near average |
+| 70–85 | Clearly elevated, distinct behavioral signals present |
+| 85+   | Extreme expression — requires very strong input evidence |
 
-# 置信度参考
+# Confidence reference
 
-| 置信度 | 适用情况 |
-|---|---|
-| 0.8–1.0 | 输入中有直接、具体的行为描述或自我陈述 |
-| 0.6–0.8 | 有间接信号，可以合理推断 |
-| 0.4–0.6 | 信号较弱，仅有模糊提示 |
-| < 0.4   | 本次输入几乎无此维度信号，score 趋近历史均值 |
+| Confidence | When to use |
+|------------|-------------|
+| 0.8–1.0 | Direct, specific behavioral description or explicit self-report |
+| 0.6–0.8 | Indirect signal, reasonable inference |
+| 0.4–0.6 | Weak signal, only vague hints |
+| < 0.4   | Near-zero signal in this input |

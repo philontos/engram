@@ -1,31 +1,31 @@
-# Schwartz 基本价值观各项说明
+# Schwartz Basic Values Scoring Guide
 
-**成就 achievement**：个人成功、能力展现、被社会认可的渴望；体现在对结果的关注、竞争意识、对自我表现的评价
-**权力 power**：对资源、地位、他人的控制欲；体现在对影响力的追求、等级意识、对权威的重视
-**享乐 hedonism**：寻求愉悦和感官满足；体现在对舒适、娱乐、当下享受的追求
-**刺激 stimulation**：对新奇、挑战和冒险的渴望；体现在对变化的欢迎、厌倦日常的表现、主动寻求新鲜感
-**自我导向 self_direction**：独立思考和行动的自由；体现在对自主性的坚持、创造性、不愿被约束
-**普世主义 universalism**：对所有人和自然的理解与关怀；体现在对公平正义的关注、环保意识、对多元文化的接纳
-**仁慈 benevolence**：对身边人的关怀与支持；体现在对家人朋友的付出、忠诚、利他行为
-**传统 tradition**：对文化习俗和传统的尊重与维护；体现在对历史传承的重视、遵循惯例、宗教信仰
-**顺从 conformity**：遵守社会规范，避免伤害他人；体现在对规则的服从、礼貌、自我克制
-**安全 security**：对稳定、和谐、安全感的需求；体现在对风险的规避、对秩序的渴望、对确定性的偏好
+**Achievement**: Drive for personal success, demonstrating competence, and social recognition. Signals: focus on outcomes, competitive mindset, self-evaluation against standards.
+**Power**: Desire for control over resources, status, and others. Signals: pursuit of influence, hierarchy-consciousness, valuing authority.
+**Hedonism**: Seeking pleasure and sensory gratification. Signals: emphasis on comfort, entertainment, present-moment enjoyment.
+**Stimulation**: Craving novelty, challenge, and excitement. Signals: welcoming change, boredom with routine, actively seeking new experiences.
+**Self-Direction**: Freedom to think and act independently. Signals: insistence on autonomy, creativity, resistance to external constraint.
+**Universalism**: Understanding and concern for all people and nature. Signals: focus on fairness and justice, environmental awareness, openness to diverse cultures.
+**Benevolence**: Care and support for people in one's immediate circle. Signals: loyalty, altruism, dedication to family and close friends.
+**Tradition**: Respect for and preservation of cultural customs and heritage. Signals: valuing historical continuity, following conventions, religious observance.
+**Conformity**: Compliance with social norms to avoid harming others. Signals: rule-following, politeness, self-restraint.
+**Security**: Need for stability, harmony, and safety. Signals: risk avoidance, desire for order, preference for certainty.
 
-# 评分区间
+# Score ranges
 
-| 分值 | 含义 |
-|---|---|
-| 0–20  | 此价值观极少体现，甚至有反向迹象 |
-| 20–40 | 低于平均水平 |
-| 40–60 | 中等水平 |
-| 60–80 | 明显体现，有清晰行为信号 |
-| 80+   | 核心价值观，主导行为和决策 |
+| Score | Meaning |
+|-------|---------|
+| 0–20  | Value rarely expressed, possibly reversed |
+| 20–40 | Below average |
+| 40–60 | Moderate |
+| 60–80 | Clearly expressed, distinct behavioral signals present |
+| 80+   | Core value — dominates behavior and decision-making |
 
-# 置信度参考
+# Confidence reference
 
-| 置信度 | 适用情况 |
-|---|---|
-| 0.8–1.0 | 输入中有直接陈述或强烈行为信号 |
-| 0.6–0.8 | 有间接信号，可合理推断 |
-| 0.4–0.6 | 信号较弱 |
-| < 0.4   | 本次输入无此价值观信号 |
+| Confidence | When to use |
+|------------|-------------|
+| 0.8–1.0 | Direct statement or strong behavioral signal |
+| 0.6–0.8 | Indirect signal, reasonable inference |
+| 0.4–0.6 | Weak signal |
+| < 0.4   | Near-zero signal for this value in this input |

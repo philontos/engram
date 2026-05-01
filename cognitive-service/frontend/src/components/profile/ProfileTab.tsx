@@ -2,8 +2,9 @@ import { useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
 import { fetchProfile, fetchProfileEvolution } from '@/api'
 import type { ProfileEvolution, EvolutionPoint } from '@/api'
-import type { ProfileDimension, SubDimValue, SubSource } from '@/types'
-import { OCEAN_NAMES, SCHWARTZ_NAMES, SCHWARTZ_COLORS } from '@/lib/constants'
+import type { ProfileDimension, SubDimValue, SubSource, DimensionSchema } from '@/types'
+import { SCHWARTZ_COLORS } from '@/lib/constants'
+import { useDimensionSchemas, getDimSchema } from '@/lib/useDimensionSchemas'
 import { fmtTime } from '@/lib/utils'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 
@@ -13,16 +14,13 @@ export function ProfileTab() {
   const [view, setView] = useState<ProfileView>('current')
   const { data: dims = [], isLoading } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile })
   const { data: evolution } = useQuery({ queryKey: ['profile-evolution'], queryFn: fetchProfileEvolution })
+  const schemas = useDimensionSchemas()
 
   if (isLoading) return (
     <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', fontSize: 13 }}>加载中…</div>
   )
 
-  const ocean    = dims.find(d => d.dimension === 'ocean')
-  const schwartz = dims.find(d => d.dimension === 'schwartz')
-  const facts    = dims.find(d => d.dimension === 'facts')
-
-  if (!ocean && !schwartz && !facts) return (
+  if (!dims.length) return (
     <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', fontSize: 13 }}>
       暂无画像数据，请先处理一些记忆
     </div>
@@ -46,9 +44,9 @@ export function ProfileTab() {
 
       {view === 'current' && (
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignContent: 'flex-start', maxWidth: 1200 }}>
-          {ocean    && <OceanCard    dim={ocean} />}
-          {schwartz && <SchwartzCard dim={schwartz} />}
-          {facts    && <FactsCard    dim={facts} />}
+          {dims.map(dim => (
+            <DimensionCard key={dim.dimension} dim={dim} schema={getDimSchema(schemas, dim.dimension)} />
+          ))}
         </div>
       )}
 
@@ -106,92 +104,76 @@ function SourceList({ sources }: { sources: SubSource[] }) {
   )
 }
 
-function OceanCard({ dim }: { dim: ProfileDimension }) {
+function DimensionCard({ dim, schema }: { dim: ProfileDimension; schema: DimensionSchema | undefined }) {
   const c = dim.content
-  return (
-    <ProfileCard title="OCEAN 人格" subtitle={`基于 ${dim.sample_count} 条记忆`}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {Object.entries(OCEAN_NAMES).map(([k, name]) => {
-          const v = (c[k] as SubDimValue | null) || { score: 50, confidence: 0 }
-          const score = v.score ?? 50
-          const conf  = v.confidence ?? 0
-          const sources = (dim.sub_sources[k] || []) as SubSource[]
-          return (
-            <div key={k}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 2 }}>
-                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--accent)', width: 16 }}>{k}</span>
-                <span style={{ fontSize: 11, color: 'var(--text3)', width: 52, flexShrink: 0 }}>{name}</span>
-                <div className="bar-track" style={{ height: 7 }}>
-                  <div className="bar-fill" style={{ width: `${score}%`, background: 'var(--accent)' }} />
-                </div>
-                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', width: 28, textAlign: 'right' }}>{Math.round(score)}</span>
-                <span style={{ fontSize: 10, color: 'var(--text3)', width: 40, textAlign: 'right' }}>c={conf.toFixed(2)}</span>
-              </div>
-              <SourceList sources={sources} />
-            </div>
-          )
-        })}
-      </div>
-    </ProfileCard>
-  )
-}
+  const fmt = schema?.summary_format ?? 'free'
+  const title = schema?.name ?? dim.dimension
 
-function SchwartzCard({ dim }: { dim: ProfileDimension }) {
-  const c = dim.content
-  const sorted = Object.entries(c)
-    .map(([k, v]) => ({ key: k, name: SCHWARTZ_NAMES[k] || k, score: v?.score ?? 50 }))
-    .sort((a, b) => b.score - a.score)
-  return (
-    <ProfileCard title="Schwartz 价值观" subtitle={`基于 ${dim.sample_count} 条记忆`}>
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-        {sorted.map((item, i) => {
-          const color   = SCHWARTZ_COLORS[i % SCHWARTZ_COLORS.length]
-          const sources = (dim.sub_sources[item.key] || []) as SubSource[]
-          return (
-            <div key={item.key}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 2 }}>
-                <div style={{ width: 4, height: 4, borderRadius: '50%', background: color, flexShrink: 0 }} />
-                <span style={{ fontSize: 11, color: 'var(--text2)', width: 64, flexShrink: 0 }}>{item.name}</span>
-                <div className="bar-track" style={{ height: 7 }}>
-                  <div className="bar-fill" style={{ width: `${item.score}%`, background: color }} />
+  if (fmt === 'scores') {
+    const entries: [string, string][] = schema?.sub_dimensions?.length
+      ? schema.sub_dimensions.map(sd => [sd.key, sd.name])
+      : Object.keys(c).map(k => [k, k])
+    const sorted = schema?.sort_by_score
+      ? [...entries].sort(([a], [b]) => ((c[b] as SubDimValue | null)?.score ?? 0) - ((c[a] as SubDimValue | null)?.score ?? 0))
+      : entries
+    return (
+      <ProfileCard title={title} subtitle={`基于 ${dim.sample_count} 条记忆`}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {sorted.map(([k, name], i) => {
+            const v = (c[k] as SubDimValue | null) ?? { score: 50, confidence: 0 }
+            const score = v.score ?? 50
+            const conf  = v.confidence ?? 0
+            const color = SCHWARTZ_COLORS[i % SCHWARTZ_COLORS.length]
+            const sources = (dim.sub_sources[k] || []) as SubSource[]
+            return (
+              <div key={k}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 2 }}>
+                  <span style={{ fontSize: 11, color: 'var(--text2)', width: 80, flexShrink: 0 }}>{name}</span>
+                  <div className="bar-track" style={{ height: 7 }}>
+                    <div className="bar-fill" style={{ width: `${score}%`, background: color }} />
+                  </div>
+                  <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', width: 28, textAlign: 'right' }}>{Math.round(score)}</span>
+                  <span style={{ fontSize: 10, color: 'var(--text3)', width: 40, textAlign: 'right' }}>c={conf.toFixed(2)}</span>
                 </div>
-                <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', width: 28, textAlign: 'right' }}>{Math.round(item.score)}</span>
+                <SourceList sources={sources} />
               </div>
-              <SourceList sources={sources} />
-            </div>
-          )
-        })}
-      </div>
-    </ProfileCard>
-  )
-}
-
-function FactsCard({ dim }: { dim: ProfileDimension }) {
-  const c = dim.content
-  const LABELS: Record<string, string> = {
-    name: '姓名', age: '年龄', gender: '性别', occupation: '职业',
-    marital_status: '婚姻', city: '城市', primary_project: '主项目',
+            )
+          })}
+        </div>
+      </ProfileCard>
+    )
   }
-  const rows = Object.entries(c).filter(([, v]) => v && String(v) !== 'null')
+
+  if (fmt === 'key_value') {
+    const rows = Object.entries(c).filter(([, v]) => v && String(v) !== 'null')
+    return (
+      <ProfileCard title={title}>
+        {rows.length === 0
+          ? <div style={{ fontSize: 12, color: 'var(--text3)' }}>暂无数据</div>
+          : (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {rows.map(([k, v]) => {
+                const val = typeof v === 'object' && v !== null && 'value' in v
+                  ? String((v as Record<string, unknown>).value) : String(v ?? '')
+                return (
+                  <div key={k} style={{ display: 'flex', gap: 16, alignItems: 'baseline' }}>
+                    <span style={{ fontSize: 11, color: 'var(--text3)', width: 80, flexShrink: 0 }}>{k}</span>
+                    <span style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{val}</span>
+                  </div>
+                )
+              })}
+            </div>
+          )
+        }
+      </ProfileCard>
+    )
+  }
+
   return (
-    <ProfileCard title="基础信息">
-      {rows.length === 0
-        ? <div style={{ fontSize: 12, color: 'var(--text3)' }}>暂无数据</div>
-        : (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
-            {rows.map(([k, v]) => {
-              const val = typeof v === 'object' && v !== null && 'value' in v
-                ? String((v as Record<string, unknown>).value) : String(v ?? '')
-              return (
-                <div key={k} style={{ display: 'flex', gap: 16, alignItems: 'baseline' }}>
-                  <span style={{ fontSize: 11, color: 'var(--text3)', width: 64, flexShrink: 0 }}>{LABELS[k] || k}</span>
-                  <span style={{ fontSize: 13, color: 'var(--text)', fontWeight: 500 }}>{val}</span>
-                </div>
-              )
-            })}
-          </div>
-        )
-      }
+    <ProfileCard title={title} subtitle={`基于 ${dim.sample_count} 条记忆`}>
+      <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'monospace' }}>
+        {JSON.stringify(c, null, 2).substring(0, 300)}
+      </div>
     </ProfileCard>
   )
 }
@@ -267,12 +249,12 @@ function EvolutionChart({ title, series }: {
 
 function EvolutionPanel({ evolution }: { evolution: ProfileEvolution }) {
   const oceanSeries = Object.entries(evolution.ocean).map(([k, pts]) => ({
-    key: k, label: `${k} ${OCEAN_NAMES[k] || k}`,
+    key: k, label: k,
     color: OCEAN_COLORS[k] || '#888', points: pts,
   }))
 
   const schwartzSeries = Object.entries(evolution.schwartz).map(([k, pts], i) => ({
-    key: k, label: SCHWARTZ_NAMES[k] || k,
+    key: k, label: k,
     color: SCHWARTZ_COLORS[i % SCHWARTZ_COLORS.length], points: pts,
   }))
 

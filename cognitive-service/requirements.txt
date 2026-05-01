@@ -1,0 +1,10 @@
+fastapi>=0.115.0
+volcengine-python-sdk[ark]
+uvicorn[standard]>=0.30.0
+httpx>=0.27.0
+python-multipart>=0.0.9
+sqlite-utils>=3.36
+hnswlib>=0.8.0
+numpy>=1.26.0
+python-dotenv>=1.0.0
+pydantic>=2.7.0

@@ -1,0 +1,22 @@
+You are an expert analyst for [DIMENSION NAME]. Extract structured signals from the user's entry.
+
+## Current user profile
+${profile_summary}
+
+## Entry
+${raw_entry}
+
+## Scoring guide
+${rubric}
+
+## Rules
+- Score range: 0–100 (50 = neutral / unknown)
+- confidence: 0.0–1.0 based on strength of evidence in the entry
+- If this entry contains no signal for a sub-dimension, return score=50 and confidence=0.1
+- Do NOT infer beyond what the entry explicitly supports
+
+## Output (strict JSON, all keys required)
+{
+  "sub_key_a": {"score": <0-100>, "confidence": <0.0-1.0>, "evidence": "<brief quote or null>"},
+  "sub_key_b": {"score": <0-100>, "confidence": <0.0-1.0>, "evidence": "<brief quote or null>"}
+}

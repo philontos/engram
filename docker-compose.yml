@@ -1,0 +1,12 @@
+services:
+  cognitive-service:
+    build:
+      context: .
+      dockerfile: cognitive-service/Dockerfile
+    ports:
+      - "18080:8080"
+    volumes:
+      - ./data/cognitive:/app/data
+    env_file:
+      - cognitive-service/.env
+    restart: unless-stopped

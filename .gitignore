@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+.pytest_cache/
+data/
+
+# Environment
+.env
+*.env.local
+
+# Node
+node_modules/
+dist/
+
+# Build artifacts
+cognitive-service/static/assets/
+cognitive-service/static/index.html
+
+# OS
+.DS_Store

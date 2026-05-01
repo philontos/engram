@@ -1,0 +1,151 @@
+@import "tailwindcss";
+
+:root {
+  --bg:       #0d0f17;
+  --surface:  #13161f;
+  --surface2: #1c2032;
+  --surface3: #242840;
+  --border:   #252a3d;
+  --border2:  #2e3450;
+  --text:     #e2e8f0;
+  --text2:    #8892a4;
+  --text3:    #4f5a6e;
+  --accent:   #6366f1;
+  --accent2:  #818cf8;
+  --green:    #10b981;
+  --red:      #f87171;
+  --yellow:   #f59e0b;
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+html, body, #root {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, 'Inter', 'Segoe UI', sans-serif;
+  font-size: 13px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+}
+
+#root { display: flex; }
+
+/* ── Scrollbar ── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--border2); border-radius: 4px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text3); }
+
+/* ── Typography ── */
+.t-title   { font-size: 13px; font-weight: 600; color: var(--text); }
+.t-body    { font-size: 12px; color: var(--text2); line-height: 1.6; }
+.t-label   { font-size: 11px; font-weight: 500; color: var(--text2); }
+.t-meta    { font-size: 11px; color: var(--text3); }
+.t-caption { font-size: 10px; font-weight: 600; color: var(--text3); text-transform: uppercase; letter-spacing: 0.06em; }
+
+/* ── Card ── */
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+}
+.card-sm {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+/* ── Divider ── */
+.divider { height: 1px; background: var(--border); flex-shrink: 0; }
+
+/* ── Badge ── */
+.badge {
+  display: inline-flex; align-items: center;
+  padding: 2px 8px; border-radius: 99px;
+  font-size: 10px; font-weight: 600; line-height: 1.4;
+}
+
+/* ── Btn ── */
+.btn {
+  display: inline-flex; align-items: center; justify-content: center; gap: 5px;
+  padding: 5px 12px; border-radius: 7px;
+  font-size: 12px; font-weight: 500; cursor: pointer;
+  transition: all 0.12s; border: none; outline: none;
+}
+.btn-primary { background: var(--accent); color: #fff; }
+.btn-primary:hover { background: #7577f3; }
+.btn-primary:disabled { opacity: 0.45; cursor: default; }
+.btn-ghost {
+  background: transparent; color: var(--text2);
+  border: 1px solid var(--border2);
+}
+.btn-ghost:hover { background: var(--surface2); color: var(--text); border-color: var(--border2); }
+
+/* ── Input ── */
+.input {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  border-radius: 8px;
+  color: var(--text);
+  font-size: 12px;
+  font-family: inherit;
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color 0.12s;
+  width: 100%;
+}
+.input:focus { border-color: var(--accent); }
+.input::placeholder { color: var(--text3); }
+
+/* ── List item ── */
+.list-item {
+  padding: 10px 16px;
+  cursor: pointer;
+  transition: background 0.1s;
+  border-bottom: 1px solid var(--border);
+}
+.list-item:hover { background: rgba(255,255,255,0.03); }
+.list-item.active {
+  background: rgba(99,102,241,0.1);
+  border-left: 2px solid var(--accent) !important;
+}
+
+/* ── Section header ── */
+.section-hd {
+  padding: 10px 16px 8px;
+  border-bottom: 1px solid var(--border);
+  display: flex; align-items: center; justify-content: space-between;
+}
+
+/* ── Bar track ── */
+.bar-track {
+  flex: 1; height: 6px;
+  background: var(--surface3);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.bar-fill { height: 100%; border-radius: 4px; transition: width 0.3s; }
+
+/* ── Chip (domain tag) ── */
+.chip {
+  display: inline-flex; align-items: center;
+  padding: 2px 7px; border-radius: 6px;
+  font-size: 10px; font-weight: 500;
+}
+
+/* ── Animations ── */
+.line-clamp-1 { display: -webkit-box; -webkit-line-clamp: 1; -webkit-box-orient: vertical; overflow: hidden; }
+.line-clamp-2 { display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+@keyframes pulse { 0%,100% { opacity:1 } 50% { opacity:0.35 } }
+.animate-pulse { animation: pulse 1.5s ease-in-out infinite; }
+@keyframes fadeIn { from { opacity:0; transform:translateY(4px) } to { opacity:1; transform:translateY(0) } }
+.fade-in { animation: fadeIn 0.15s ease-out; }
+
+.log-item:hover { background: rgba(99,102,241,0.05) !important; }
+.log-item:hover .log-delete-btn { opacity: 1 !important; }
+.log-delete-btn:hover { color: var(--red) !important; background: rgba(248,113,113,0.1) !important; }

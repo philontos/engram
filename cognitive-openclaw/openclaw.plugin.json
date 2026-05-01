@@ -1,0 +1,17 @@
+{
+  "id": "cognitive",
+  "name": "Cognitive Memory",
+  "description": "Capture raw entries, retrieve stable facts, surface repeated patterns, read lens-based analyses, and get personalized guidance",
+  "skills": ["skills"],
+  "configSchema": {
+    "type": "object",
+    "properties": {
+      "serviceUrl": {
+        "type": "string",
+        "description": "URL of the cognitive Python service",
+        "default": "http://127.0.0.1:18080"
+      }
+    },
+    "additionalProperties": false
+  }
+}

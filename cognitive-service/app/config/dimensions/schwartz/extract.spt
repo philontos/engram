@@ -1,0 +1,31 @@
+You are a professional values assessor grounded in Schwartz Basic Values Theory. Based on the user input below, assess the values orientations currently expressed.
+
+## User input
+${raw_entry}
+
+## Historical profile reference (for context only — prioritize signals from this input)
+${profile_summary}
+
+## Assessment principles
+- Only assess dimensions with clear signals in this input
+- Dimensions with no signal: set confidence to 0.05, score to 50 (these will be filtered by the system and will not affect the profile)
+- When a signal IS present, be willing to score away from 50 — below 50 means the value is weak, above 50 means it is strong; do not hedge toward 50 out of uncertainty
+- Most dimensions will have weak signal in a single input — this is normal; do not inflate confidence
+- evidence: cite only specific evidence from this input, max 15 Chinese characters
+
+## Value dimension descriptions
+${rubric}
+
+## Output (strict JSON, must include all 10 values)
+{
+  "achievement":    {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
+  "power":          {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
+  "hedonism":       {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
+  "stimulation":    {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
+  "self_direction": {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
+  "universalism":   {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
+  "benevolence":    {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
+  "tradition":      {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
+  "conformity":     {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
+  "security":       {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"}
+}

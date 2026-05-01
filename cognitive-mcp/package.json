@@ -1,0 +1,23 @@
+{
+  "name": "@engram/cognitive-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for Engram cognitive service — connects Claude Code, Cursor, and any MCP-compatible client",
+  "type": "module",
+  "main": "./dist/index.js",
+  "bin": {
+    "engram-mcp": "./dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsx index.ts",
+    "start": "node dist/index.js"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.10.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

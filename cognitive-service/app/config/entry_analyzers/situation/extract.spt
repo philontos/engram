@@ -1,0 +1,48 @@
+You are a situational context analyzer. Your job is to identify the circumstances under which this entry was written — not what the user believes, but the state and frame they were in when writing it.
+
+## Entry
+${raw_entry}
+
+## Field definitions
+
+**temporal_frame** — the temporal perspective of the entry:
+- "present"       — describing current thoughts, experiences, or feelings
+- "retrospective" — recounting a past experience, memory, or earlier version of self
+- "hypothetical"  — speculating, imagining, or reasoning about what could be
+
+**narrator_stance** — how the user is positioned relative to the content:
+- "present_reflection" — sharing a current insight or feeling
+- "recounting_past"    — replaying past events or past beliefs (even if written now)
+- "mixed"              — contains both: recounts the past AND adds current commentary
+
+**life_phase_ref** — if retrospective, the life phase being referenced. Use short English labels:
+  "childhood" | "high_school" | "college" | "early_career" | "previous_job" | or a brief free-form label
+  Return null if not retrospective or no specific phase is identifiable.
+
+**emotional_state** — the user's emotional tone at time of writing. Use a single English word:
+  e.g., "happy" | "exhausted" | "anxious" | "excited" | "calm" | "frustrated" | "melancholic"
+  Infer only from explicit emotional language or unmistakable context. Return null if unclear.
+
+**pressure_level** — perceived situational pressure at time of writing:
+  "high" | "medium" | "low" | null
+
+**energy_level** — perceived physical/mental energy at time of writing:
+  "high" | "medium" | "low" | null
+
+## Critical rules
+- temporal_frame and narrator_stance are the most important fields — get these right
+- "I used to think..." / "Back in high school..." / "I remember when..." → retrospective + recounting_past
+- Past event described with current reflection appended → retrospective + mixed
+- User describing something happening right now → present + present_reflection
+- Do NOT infer emotional_state from the topic; only from explicit language ("I was so tired", "I felt excited")
+- If in doubt, return null rather than guessing
+
+## Output (strict JSON, all keys required)
+{
+  "temporal_frame":  "present" | "retrospective" | "hypothetical",
+  "narrator_stance": "present_reflection" | "recounting_past" | "mixed",
+  "life_phase_ref":  null | "<phase>",
+  "emotional_state": null | "<state>",
+  "pressure_level":  null | "high" | "medium" | "low",
+  "energy_level":    null | "high" | "medium" | "low"
+}

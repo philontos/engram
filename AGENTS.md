@@ -11,10 +11,11 @@ This file is read by Claude Code, Cursor, Codex, Copilot, and other agents that 
 
 ## Hard rules (apply everywhere)
 
-1. **Canonical enums are English.** `domain`, `node_type`, `relation_type` in code, prompts, configs, and DB are always English (`psychology`, `concept`, `opposes`, …). Chinese display is a presentation concern handled by i18n on the frontend. Never write Chinese enum literals into Python source, prompts, configs, or DB schemas.
-2. **Backend prompts default to English.** Built-in `app/config/backbones/*` and `app/config/dimensions/*` prompt templates are written in English. LLMs are instructed to "match the user's language" — do not pin output language in prompts (no "in Chinese" / "X Chinese characters" / "X English words" wording). User-extended backbones / dimensions can be any language; defaults stay English.
-3. **Restart-required config is OK.** Backbone / dimension loaders run at module import; adding or toggling a backbone via `scripts/manage_config.py` requires a service restart. Don't paper over this with hot-reload heuristics.
-4. **Migration files are forward-only and idempotent.** New SQL migrations live in `cognitive-service/migrations/`. Never re-edit a committed migration; add a new one.
+1. **Engram only stores cognitive content** — thoughts, reflections, ideas, decisions, observations, emotional self-analysis. The intent gate (`app/lib/intent_gate.py`) rejects pure event logs / reminders / factual notes. Do NOT add features that turn Engram into a notes / journal / todo app. If a feature pushes the system toward "log everything", say no.
+2. **Canonical enums are English.** `domain`, `node_type`, `relation_type` in code, prompts, configs, and DB are always English (`psychology`, `concept`, `opposes`, …). Chinese display is a presentation concern handled by i18n on the frontend. Never write Chinese enum literals into Python source, prompts, configs, or DB schemas.
+3. **Backend prompts default to English.** Built-in `app/config/backbones/*` and `app/config/dimensions/*` prompt templates are written in English. LLMs are instructed to "match the user's language" — do not pin output language in prompts (no "in Chinese" / "X Chinese characters" / "X English words" wording). User-extended backbones / dimensions can be any language; defaults stay English.
+4. **Restart-required config is OK.** Backbone / dimension loaders run at module import; adding or toggling a backbone via `scripts/manage_config.py` requires a service restart. Don't paper over this with hot-reload heuristics.
+5. **Migration files are forward-only and idempotent.** New SQL migrations live in `cognitive-service/migrations/`. Never re-edit a committed migration; add a new one.
 
 ## Sub-rules per area
 

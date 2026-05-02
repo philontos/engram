@@ -168,32 +168,28 @@ off_topic: Greetings / small talk / test input / meaningless / unrelated to pers
 
 ## mode (only meaningful when intent=proceed; default to "reflective" for other intents)
 factual: Asks about how the world works — facts, definitions, mechanisms, possibility.
-  Patterns: "X 是什么", "X 能不能 Y", "为什么会 X", "X 和 Y 的区别", asking for knowledge/research.
-  Examples:
-    - "内向的人能变外向吗？" → factual
-    - "什么是依恋类型？" → factual
-    - "认知行为疗法和精神分析的区别？" → factual
   Wants: a real answer grounded in knowledge, with personalized lens as secondary.
+  Examples:
+    - "什么是依恋类型？" → factual
+    - "What's the difference between CBT and psychoanalysis?" → factual
 
 reflective: Asks for self-diagnosis / advice / decisions about themselves.
-  Patterns: "我该怎么办", "我是不是 X", "为什么我总是 X", "我应不应该 X".
-  Examples:
-    - "我该不该跟老婆说这件事？" → reflective
-    - "我是不是有社交恐惧？" → reflective
-    - "我为什么总是回避冲突？" → reflective
   Wants: cognitive diagnosis grounded in their own profile + records.
+  Examples:
+    - "我为什么总是回避冲突？" → reflective
+    - "Should I leave this job? I keep going back and forth." → reflective
 
 exploratory: Records a thought, observation, or musing — not really asking but inviting connection.
-  Patterns: "我最近在想 X", "我发现 X", statements without question marks, idea-sharing.
-  Examples:
-    - "我发现锚点理论好像也适用于亲密关系" → exploratory
-    - "最近一直在想自由意志这件事" → exploratory
+  Statement form, often without a question mark, idea-sharing tone.
   Wants: gentle expansion — surface related beliefs, suggest tensions, propose directions.
+  Examples:
+    - "最近一直在想自由意志这件事" → exploratory
+    - "I keep noticing how anchoring theory shows up in relationships too" → exploratory
 
 ## Mode disambiguation rule
-When a question mixes factual + reflective ("我该不该转行做心理学" mixes career-decision + field-knowledge),
-prefer reflective — the personal stake dominates. Pure knowledge questions go to factual.
-When unsure between any two, default to reflective (safest fallback).\
+When a question mixes factual + reflective (e.g. "Should I switch into psychology?" mixes
+a career decision with field knowledge), prefer reflective — the personal stake dominates.
+Pure knowledge questions go to factual. When unsure between any two, default to reflective.\
 """
 
 _Q1_SYSTEM = "You are a knowledgeable generalist advisor. Given the user's question, provide an objective, balanced analysis covering the main angles. Be direct, avoid flattery or exaggeration. Match the user's language. Keep it under ~120 words."

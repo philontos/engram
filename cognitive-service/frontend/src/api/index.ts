@@ -1,6 +1,6 @@
 import type {
   Entry, EntryDetail, GraphData, ProfileDimension, DimensionSchema,
-  QueryLogSummary, QueryLogDetail, Stats, TraceData, Memo,
+  QueryLogSummary, QueryLogDetail, Stats, TraceData,
 } from '@/types'
 
 async function req<T>(url: string, init?: RequestInit): Promise<T> {
@@ -104,10 +104,6 @@ export const deleteQueryLog = (id: number) =>
 
 export const clearQueryLogs = () =>
   req<{ deleted: boolean }>('/ui/api/query-logs', { method: 'DELETE' })
-
-// ── Memos ─────────────────────────────────────────────────────────────────────
-export const fetchMemos = (limit = 200) =>
-  req<{ total: number; memos: Memo[] }>(`/ui/api/memos?limit=${limit}`)
 
 // ── Admin ─────────────────────────────────────────────────────────────────────
 export const exportEntries = () => fetch('/ui/api/export')

@@ -42,51 +42,50 @@ const server = new McpServer({
 // ── Tool: capture ─────────────────────────────────────────────────────────────
 
 server.tool(
-  "cognitive_capture_memory",
-  "Write a memory to the Engram cognitive graph. " +
-  "Pass the user's text EXACTLY as written — do not paraphrase, summarize, or add anything. " +
-  "Call once per message, immediately.",
+  "cognitive_capture_thought",
+  "Capture a user's thought, reflection, idea, observation, decision, or emotional self-analysis " +
+  "into the Engram cognitive graph. " +
+  "Use ONLY when the user is expressing how they THINK or FEEL about something — not for events, " +
+  "plans, reminders, or factual logs (Engram is not a notes app). " +
+  "Pass the user's text EXACTLY as written — no paraphrase, no summary, no additions.",
   {
     content: z.string().describe(
-      "EXACT copy of what the user said or typed — every word, every character, unchanged. " +
+      "EXACT copy of what the user said or typed — every word unchanged. " +
       "Do NOT paraphrase, summarize, complete, or add anything. " +
       "If the user spoke 500 words, this field must contain all 500 words."
     ),
-    memory_type: z.enum([
-      "thought", "reflection", "idea", "behavior", "emotion", "event", "lesson"
-    ]).optional().describe("Type of memory entry"),
-    mood: z.string().optional(),
+    mood: z.string().optional().describe(
+      "Optional one-word mood tag the user explicitly mentioned (e.g. anxious, hopeful)."
+    ),
     tags: z.array(z.string()).optional(),
   },
-  async ({ content, memory_type, mood, tags }) => {
+  async ({ content, mood, tags }) => {
     const result = await post("/capture", {
       type: "text",
       content,
-      memory_type,
       mood,
       tags,
       source: "mcp",
     }) as {
-      track: string;
+      track: "entry" | "reject";
       id: number | null;
-      buffer_session_id: string | null;
+      reason: string;
     };
 
-    const trackLabel: Record<string, string> = {
-      entry: "Captured",
-      memo: "Saved as memo",
-      buffer: "Buffered (awaiting continuation)",
-      buffer_flushed: "Buffer merged into entry",
-    };
-    const label = trackLabel[result.track] ?? result.track;
-    const idPart = result.id != null
-      ? ` #${result.id}`
-      : result.buffer_session_id
-        ? ` (buffer ${result.buffer_session_id.slice(0, 8)})`
+    if (result.track === "reject") {
+      const hint = result.reason
+        ? ` Hint: ${result.reason}`
         : "";
+      return {
+        content: [{
+          type: "text" as const,
+          text: `Not captured — input looks like a fact/event log, not a thought.${hint}`,
+        }],
+      };
+    }
 
     return {
-      content: [{ type: "text" as const, text: `${label}${idPart}` }],
+      content: [{ type: "text" as const, text: `Captured #${result.id}` }],
     };
   }
 );
@@ -104,8 +103,8 @@ server.tool(
       "full (default): baseline + persona + graph + synthesis. fast: graph + synthesis only."
     ),
     continue_last: z.boolean().optional().describe(
-      "Set true when the user references any prior conversation " +
-      "('继续上次', '接着刚才', etc.). Default false."
+      "Set true when the user is picking up an earlier conversation. " +
+      "Default false for any new standalone question."
     ),
   },
   async ({ question, mode = "full", continue_last = false }) => {
@@ -128,10 +127,15 @@ server.tool(
     }
 
     // Consume NDJSON stream
-    const text = await resp.text();
-    const lines = text.split("\n").filter((l) => l.trim());
+    const body = await resp.text();
+    const lines = body.split("\n").filter((l) => l.trim());
 
-    let insight = "";
+    const stages: Record<string, string> = {
+      baseline: "",
+      persona_blindspot: "",
+      graph_insight: "",
+      intent_check: "",
+    };
     let finalSessionId = sessionId;
 
     for (const line of lines) {
@@ -143,8 +147,8 @@ server.tool(
           session_id?: string;
           message?: string;
         };
-        if (event.type === "delta" && event.stage === "graph_insight" && event.delta) {
-          insight += event.delta;
+        if (event.type === "delta" && event.stage && event.delta && event.stage in stages) {
+          stages[event.stage] += event.delta;
         }
         if (event.type === "done" && event.session_id) {
           finalSessionId = event.session_id;
@@ -159,8 +163,21 @@ server.tool(
 
     void finalSessionId;
 
+    if (stages.intent_check) {
+      return {
+        content: [{ type: "text" as const, text: stages.intent_check }],
+      };
+    }
+
+    const sections: string[] = [];
+    if (stages.baseline) sections.push(`## Baseline\n\n${stages.baseline}`);
+    if (stages.persona_blindspot) sections.push(`## Persona lens\n\n${stages.persona_blindspot}`);
+    if (stages.graph_insight) sections.push(`## Graph insight\n\n${stages.graph_insight}`);
+
+    const output = sections.length > 0 ? sections.join("\n\n") : "(No relevant content in graph)";
+
     return {
-      content: [{ type: "text" as const, text: insight || "(No relevant content in graph)" }],
+      content: [{ type: "text" as const, text: output }],
     };
   }
 );

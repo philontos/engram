@@ -2,9 +2,11 @@
 
 [English](README.md) · **中文**
 
-> 一份个人认知图谱——不只是你说过什么，而是你是谁。
+> 把你的"思考"映射出来。Engram 让 AI 终于能看见你的*思维结构*，而不是只看见你的字。
 
-Engram 是为 AI 助手打造的、能自我成长的记忆系统。当你不断捕捉想法、反思和观察，Engram 会构建出结构化的人格画像和知识图谱——让 AI 工具不再只是回放你上周写过什么，而是真正理解你、给出贴合你的回应。
+Engram 只收一种东西：你日常的思考内容——想法、反思、洞察、决策、自我观察。它把这些累积成一份结构化的人格画像 + 知识图谱。一段时间后，你的 AI 工具不再是在"回复你的消息"，而是在"回应你这个人"。
+
+**Engram 不是笔记 app。** 别用它记"今天午饭吃了什么"。用它捕捉那些你正在思考、犹豫、决定、意识到的瞬间。纯事件流水会在意图门被礼貌挡回。
 
 ---
 
@@ -26,9 +28,9 @@ Engram 是为 AI 助手打造的、能自我成长的记忆系统。当你不断
 ## 工作原理
 
 ```
-你的笔记 / 语音 / 对话
+你写下/说出/发送的一段思考
          ↓
-   [ 捕获 ]              意图门 → entry / memo / buffer
+   [ 捕获 ]              意图门：接受思考，拒绝纯事件流水
          ↓
    [ 切片管线 ]          抽取 OCEAN、Schwartz 价值观、情境上下文
          ↓
@@ -68,32 +70,82 @@ Dashboard UI 在 `http://localhost:18080/`。
 
 ## 接入到你的 AI 工具
 
-### Claude Code / Cursor
+MCP server 是一层薄薄的 stdio 桥接：AI 客户端按需把它 fork 为子进程，子进程再通过 HTTP 把工具调用转给跑在 `localhost:18080` 的 cognitive-service。构建一次，所有客户端都指向同一个 `dist/index.js`。
+
+### 构建 MCP server
 
 ```bash
 cd cognitive-mcp
 pnpm install
 pnpm build
+# 产物：cognitive-mcp/dist/index.js
 ```
 
-加入 `~/.claude/settings.json`（Claude Code）或 `~/.cursor/mcp.json`（Cursor）：
+> 改了 MCP 源码后必须重新 `pnpm build`，并让客户端重连（或重启）以加载新产物。
+
+### Claude Code
+
+推荐用 CLI（避免手动改 JSON 写错路径）：
+
+```bash
+claude mcp add engram --scope user \
+  --env ENGRAM_SERVICE_URL=http://127.0.0.1:18080 \
+  -- node /绝对路径/engram/cognitive-mcp/dist/index.js
+```
+
+或者直接编辑 `~/.claude.json`，在顶层 `mcpServers` 下加：
 
 ```json
 {
   "mcpServers": {
     "engram": {
       "command": "node",
-      "args": ["/path/to/engram/cognitive-mcp/dist/index.js"],
-      "env": {
-        "ENGRAM_SERVICE_URL": "http://127.0.0.1:18080"
-      }
+      "args": ["/绝对路径/engram/cognitive-mcp/dist/index.js"],
+      "env": { "ENGRAM_SERVICE_URL": "http://127.0.0.1:18080" }
     }
   }
 }
 ```
 
-你的 AI 助手中就会出现两个工具：
-- **`cognitive_capture_memory`** — 捕获一段想法、反思或观察
+验证：在 Claude Code 里输入 `/mcp`，`engram` 应显示 **connected**。
+
+### Cursor
+
+编辑 `~/.cursor/mcp.json`（项目级则放仓库根目录的 `.cursor/mcp.json`）：
+
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "node",
+      "args": ["/绝对路径/engram/cognitive-mcp/dist/index.js"],
+      "env": { "ENGRAM_SERVICE_URL": "http://127.0.0.1:18080" }
+    }
+  }
+}
+```
+
+验证：Cursor → Settings → MCP，`engram` 一行应该有绿点。
+
+### Codex CLI
+
+编辑 `~/.codex/config.toml`（注意是 TOML，不是 JSON）：
+
+```toml
+[mcp_servers.engram]
+command = "node"
+args = ["/绝对路径/engram/cognitive-mcp/dist/index.js"]
+
+[mcp_servers.engram.env]
+ENGRAM_SERVICE_URL = "http://127.0.0.1:18080"
+```
+
+验证：`codex mcp list` 应能看到 `engram`。
+
+### 暴露的工具
+
+以上任意一个客户端连通后，都会拿到这两个工具：
+- **`cognitive_capture_thought`** — 捕获一段想法、反思、灵感或观察（事件/事实日志会在 intent gate 被拒）
 - **`cognitive_query`** — 基于你的完整认知画像发起查询
 
 ### OpenClaw

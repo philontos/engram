@@ -49,7 +49,6 @@ def stats():
             "nodes":          conn.execute("SELECT COUNT(*) FROM backbone_nodes").fetchone()[0],
             "edges":          conn.execute("SELECT COUNT(*) FROM backbone_edges").fetchone()[0],
             "activations":    conn.execute("SELECT COUNT(*) FROM backbone_activations").fetchone()[0],
-            "memos":          conn.execute("SELECT COUNT(*) FROM memos").fetchone()[0],
         }
 
 
@@ -872,30 +871,6 @@ def admin_reset(req: ResetRequest):
     vs_mod._store = None
 
     return {"scope": req.scope, "status": "done"}
-
-
-@router.get("/memos")
-def list_memos(limit: int = 200, offset: int = 0):
-    with get_conn() as conn:
-        rows = conn.execute(
-            "SELECT id, raw, source, keywords_json, metadata_json, created_at FROM memos ORDER BY created_at DESC LIMIT ? OFFSET ?",
-            (limit, offset),
-        ).fetchall()
-        total = conn.execute("SELECT COUNT(*) FROM memos").fetchone()[0]
-    return {
-        "total": total,
-        "memos": [
-            {
-                "id":           r["id"],
-                "raw":          r["raw"],
-                "source":       r["source"],
-                "keywords":     json.loads(r["keywords_json"] or "[]"),
-                "metadata":     json.loads(r["metadata_json"] or "{}"),
-                "created_at":   r["created_at"],
-            }
-            for r in rows
-        ],
-    }
 
 
 @router.post("/admin/process-pending")

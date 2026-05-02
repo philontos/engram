@@ -1,8 +1,8 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { fetchEntries, fetchEntry, fetchEntryTrace, fetchMemos, processEntry, deleteEntry, revertEntry, exportEntryTrace, exportAllTraces } from '@/api'
-import type { EntryDetail, TraceData, SliceFeature, Memo, SituationContext } from '@/types'
+import { fetchEntries, fetchEntry, fetchEntryTrace, processEntry, deleteEntry, revertEntry, exportEntryTrace, exportAllTraces } from '@/api'
+import type { EntryDetail, TraceData, SliceFeature, SituationContext } from '@/types'
 import { SCHWARTZ_COLORS, getDomainColor, getDomainLabel } from '@/lib/constants'
 import { useDimensionSchemas, getDimSchema } from '@/lib/useDimensionSchemas'
 import { useBackbones } from '@/lib/useBackbones'
@@ -12,15 +12,11 @@ import { fmtTime } from '@/lib/utils'
 import { RefreshCw, Cpu, Search, Trash2, ChevronRight, RotateCcw } from 'lucide-react'
 import { useConfirm } from '@/components/ui/ConfirmDialog'
 
-type ListTab = 'entries' | 'memos'
-
 export function EntriesTab() {
   const qc = useQueryClient()
   const { backbones } = useBackbones()
   const { lang, t } = useI18n()
-  const [listTab, setListTab]          = useState<ListTab>('entries')
   const [selectedId, setSelectedId]    = useState<number | null>(null)
-  const [selectedMemoId, setSelectedMemoId] = useState<number | null>(null)
   const [traceId, setTraceId]          = useState<number | null>(null)
   const [captureText, setCaptureText]  = useState('')
   const [capturing, setCapturing]      = useState(false)
@@ -33,10 +29,6 @@ export function EntriesTab() {
   const { data: entries = [], isLoading } = useQuery({
     queryKey: ['entries'], queryFn: () => fetchEntries(200),
   })
-  const { data: memosData, isLoading: memosLoading } = useQuery({
-    queryKey: ['memos'], queryFn: () => fetchMemos(200),
-  })
-  const memos = memosData?.memos ?? []
 
   // When the user has not picked an entry yet, fall back to the first one in
   // the list. Derived at render time (not via setState-in-effect) so React 19
@@ -48,8 +40,6 @@ export function EntriesTab() {
   const { data: traceData } = useQuery({
     queryKey: ['trace', traceId], queryFn: () => fetchEntryTrace(traceId!), enabled: traceId !== null,
   })
-
-  const selectedMemo = memos.find(m => m.id === selectedMemoId) ?? memos[0] ?? null
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -65,15 +55,14 @@ export function EntriesTab() {
     try {
       const res = await fetch('/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: text, source: 'web' }) })
       if (!res.ok) throw new Error(await res.text())
-      const data = await res.json()
-      setCaptureText('')
-      if (data.track === 'memo') {
-        await qc.invalidateQueries({ queryKey: ['memos'] })
-        setListTab('memos')
-      } else {
-        await qc.invalidateQueries({ queryKey: ['entries'] })
-        await qc.invalidateQueries({ queryKey: ['stats'] })
+      const data = await res.json() as { track: 'entry' | 'reject'; reason?: string }
+      if (data.track === 'reject') {
+        alert(data.reason || t('entries.write_failed', { error: 'rejected' }))
+        return
       }
+      setCaptureText('')
+      await qc.invalidateQueries({ queryKey: ['entries'] })
+      await qc.invalidateQueries({ queryKey: ['stats'] })
     } catch (err) { alert(t('entries.write_failed', { error: String(err) })) }
     finally { setCapturing(false) }
   }
@@ -143,21 +132,10 @@ export function EntriesTab() {
           </button>
         </div>
 
-        {/* Header with tab switcher */}
+        {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
-          <div style={{ display: 'flex', gap: 4 }}>
-            {(['entries', 'memos'] as ListTab[]).map(tab => (
-              <button key={tab} onClick={() => setListTab(tab)}
-                style={{
-                  padding: '3px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 500,
-                  background: listTab === tab ? 'var(--accent)' : 'transparent',
-                  color: listTab === tab ? '#fff' : 'var(--text3)',
-                }}>
-                {tab === 'entries' ? t('entries.tab_entries') : t('entries.tab_memos')}
-              </button>
-            ))}
-          </div>
-          <button onClick={() => qc.invalidateQueries({ queryKey: [listTab === 'entries' ? 'entries' : 'memos'] })}
+          <span style={{ fontSize: 11, fontWeight: 500, color: 'var(--text3)' }}>{t('entries.tab_entries')}</span>
+          <button onClick={() => qc.invalidateQueries({ queryKey: ['entries'] })}
             style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', display: 'flex', padding: 4, borderRadius: 6 }}>
             <RefreshCw size={13} />
           </button>
@@ -165,8 +143,7 @@ export function EntriesTab() {
 
         {/* List */}
         <div style={{ flex: 1, overflowY: 'auto' }}>
-          {listTab === 'entries' && (
-            <>
+          <>
               {isLoading && <div style={{ padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>{t('entries.loading')}</div>}
               {entries.map(e => {
                 const isSelected = effectiveSelectedId === e.id
@@ -234,111 +211,25 @@ export function EntriesTab() {
                 )
               })}
             </>
-          )}
-          {listTab === 'memos' && (
-            <>
-              {memosLoading && <div style={{ padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>{t('entries.loading')}</div>}
-              {memos.map(m => {
-                const isSelected = selectedMemo?.id === m.id
-                return (
-                  <div key={m.id} onClick={() => setSelectedMemoId(m.id)}
-                    style={{
-                      padding: '12px 16px', cursor: 'pointer', borderBottom: '1px solid var(--border)',
-                      background: isSelected ? 'rgba(99,102,241,0.1)' : 'transparent',
-                      borderLeft: isSelected ? '2px solid var(--accent)' : '2px solid transparent',
-                      transition: 'background 0.1s',
-                    }}>
-                    <div className="line-clamp-2" style={{ fontSize: 12, color: 'var(--text)', lineHeight: 1.55, marginBottom: 6 }}>
-                      {m.raw}
-                    </div>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                      <span style={{ fontSize: 10, color: 'var(--text3)' }}>{fmtTime(m.created_at)}</span>
-                      <span className="badge" style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>{t('entries.memo_label')}</span>
-                      {m.keywords.slice(0, 3).map(k => (
-                        <span key={k} className="chip" style={{ background: 'rgba(100,116,139,0.15)', color: 'var(--text3)' }}>{k}</span>
-                      ))}
-                    </div>
-                  </div>
-                )
-              })}
-              {!memosLoading && memos.length === 0 && (
-                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>{t('entries.no_memos')}</div>
-              )}
-            </>
-          )}
         </div>
       </div>
 
       {/* ── Right detail ── */}
       <div style={{ flex: 1, overflowY: 'auto', minWidth: 0 }}>
-        {listTab === 'entries' && !effectiveSelectedId && (
+        {!effectiveSelectedId && (
           <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', gap: 8 }}>
             <ChevronRight size={28} strokeWidth={1.5} />
             <span style={{ fontSize: 13 }}>{t('entries.select_one')}</span>
           </div>
         )}
-        {listTab === 'entries' && effectiveSelectedId && detail && (
+        {effectiveSelectedId && detail && (
           <EntryDetailPanel detail={detail} onTrace={() => setTraceId(effectiveSelectedId)} />
-        )}
-        {listTab === 'memos' && selectedMemo && (
-          <MemoDetailPanel memo={selectedMemo} />
         )}
       </div>
 
       {/* Trace Modal */}
       {traceId !== null && (
         <TraceModal traceId={traceId} traceData={traceData} onClose={() => setTraceId(null)} />
-      )}
-    </div>
-  )
-}
-
-function MemoDetailPanel({ memo }: { memo: Memo }) {
-  const { t } = useI18n()
-  const meta = memo.metadata
-  const META_LABELS: Record<string, string> = {
-    captured_at: t('entries.captured_at'), date: t('entries.date'), weekday: t('entries.weekday'),
-    time_of_day: t('entries.time_of_day'), channel: t('entries.channel'), source_type: t('entries.source_type'), timezone: t('entries.timezone'),
-  }
-  const metaRows = Object.entries(meta).filter(([k]) => k !== 'captured_at' || true)
-
-  return (
-    <div style={{ padding: '24px 28px', maxWidth: 720 }}>
-      <div style={{ marginBottom: 20 }}>
-        <span className="badge" style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b', marginBottom: 8, display: 'inline-flex' }}>
-          {t('entries.memo_id', { id: memo.id })}
-        </span>
-        <div style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.75, marginBottom: 8 }}>{memo.raw}</div>
-        <div style={{ fontSize: 11, color: 'var(--text3)' }}>{fmtTime(memo.created_at)} · {memo.source}</div>
-      </div>
-
-      {memo.keywords.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <div className="t-caption" style={{ marginBottom: 8 }}>{t('entries.keywords')}</div>
-          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
-            {memo.keywords.map(k => (
-              <span key={k} className="chip" style={{ background: 'rgba(100,116,139,0.15)', color: 'var(--text2)' }}>{k}</span>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {metaRows.length > 0 && (
-        <div>
-          <div className="t-caption" style={{ marginBottom: 8 }}>{t('entries.metadata')}</div>
-          <div style={{ borderRadius: 10, border: '1px solid var(--border)', overflow: 'hidden' }}>
-            {metaRows.map(([k, v], i) => (
-              <div key={k} style={{
-                display: 'flex', gap: 16, padding: '8px 14px', fontSize: 12,
-                background: i % 2 === 0 ? 'var(--surface)' : 'var(--surface2)',
-                borderBottom: i < metaRows.length - 1 ? '1px solid var(--border)' : 'none',
-              }}>
-                <span style={{ color: 'var(--text3)', width: 90, flexShrink: 0 }}>{META_LABELS[k] || k}</span>
-                <span style={{ color: 'var(--text)', wordBreak: 'break-all' }}>{String(v)}</span>
-              </div>
-            ))}
-          </div>
-        </div>
       )}
     </div>
   )

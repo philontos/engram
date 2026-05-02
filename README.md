@@ -2,9 +2,11 @@
 
 **English** · [中文](README.zh.md)
 
-> A personal cognitive graph that models who you are, not just what you said.
+> Your thoughts, mapped. Engram turns the way you *think* into a structure your AI can finally see.
 
-Engram is a self-building memory system for AI assistants. As you capture thoughts, reflections, and observations over time, Engram constructs a structured personality profile and knowledge graph — so your AI tools can give genuinely personalized responses, not just recall what you typed last week.
+Engram captures the cognitive content of your day — thoughts, reflections, ideas, decisions, observations — and builds a structured personality profile + knowledge graph from them. Over time, your AI tools stop replying to your messages and start replying to *you*.
+
+**Engram is not a notes app.** Don't use it to log what you ate for lunch. Use it when you catch yourself thinking, doubting, deciding, realizing. Pure factual logs are politely declined at the gate.
 
 ---
 
@@ -26,9 +28,9 @@ Most AI memory systems are retrieval layers: store text, search text. Engram bui
 ## How it works
 
 ```
-Your notes / voice / chat
+A thought you typed / spoke / messaged
          ↓
-   [ capture ]          Intent gate → entry / memo / buffer
+   [ capture ]          Intent gate accepts thoughts; rejects pure event logs
          ↓
    [ slice pipeline ]   Extract OCEAN, Schwartz values, situational context
          ↓
@@ -68,32 +70,82 @@ The dashboard UI is at `http://localhost:18080/`.
 
 ## Connect to your AI tool
 
-### Claude Code / Cursor
+The MCP server is a thin stdio bridge. Your AI client spawns it as a subprocess on demand; it forwards tool calls over HTTP to the cognitive-service running on `localhost:18080`. Build it once, then point each client at the same `dist/index.js`.
+
+### Build the MCP server
 
 ```bash
 cd cognitive-mcp
 pnpm install
 pnpm build
+# produces cognitive-mcp/dist/index.js
 ```
 
-Add to `~/.claude/settings.json` (Claude Code) or `~/.cursor/mcp.json` (Cursor):
+> Re-run `pnpm build` whenever you change MCP source. Restart the client (or reconnect the server) so it picks up the new binary.
+
+### Claude Code
+
+Use the CLI (recommended — avoids hand-editing JSON):
+
+```bash
+claude mcp add engram --scope user \
+  --env ENGRAM_SERVICE_URL=http://127.0.0.1:18080 \
+  -- node /absolute/path/to/engram/cognitive-mcp/dist/index.js
+```
+
+Or edit `~/.claude.json` directly and add under the top-level `mcpServers` key:
 
 ```json
 {
   "mcpServers": {
     "engram": {
       "command": "node",
-      "args": ["/path/to/engram/cognitive-mcp/dist/index.js"],
-      "env": {
-        "ENGRAM_SERVICE_URL": "http://127.0.0.1:18080"
-      }
+      "args": ["/absolute/path/to/engram/cognitive-mcp/dist/index.js"],
+      "env": { "ENGRAM_SERVICE_URL": "http://127.0.0.1:18080" }
     }
   }
 }
 ```
 
-Two tools become available in your AI assistant:
-- **`cognitive_capture_memory`** — capture a thought, reflection, or observation
+Verify: run `/mcp` inside Claude Code — `engram` should show **connected**.
+
+### Cursor
+
+Edit `~/.cursor/mcp.json` (project-scoped: `.cursor/mcp.json` in repo root):
+
+```json
+{
+  "mcpServers": {
+    "engram": {
+      "command": "node",
+      "args": ["/absolute/path/to/engram/cognitive-mcp/dist/index.js"],
+      "env": { "ENGRAM_SERVICE_URL": "http://127.0.0.1:18080" }
+    }
+  }
+}
+```
+
+Verify: Cursor → Settings → MCP — `engram` row should show a green dot.
+
+### Codex CLI
+
+Edit `~/.codex/config.toml` (TOML, not JSON):
+
+```toml
+[mcp_servers.engram]
+command = "node"
+args = ["/absolute/path/to/engram/cognitive-mcp/dist/index.js"]
+
+[mcp_servers.engram.env]
+ENGRAM_SERVICE_URL = "http://127.0.0.1:18080"
+```
+
+Verify: `codex mcp list` should show `engram`.
+
+### Tools exposed
+
+Two tools become available in any of the clients above:
+- **`cognitive_capture_thought`** — capture a thought, reflection, idea, or observation (event/fact logs are rejected at the intent gate)
 - **`cognitive_query`** — ask a question using your full cognitive profile
 
 ### OpenClaw

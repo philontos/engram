@@ -159,32 +159,6 @@ def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_query_logs_created ON query_logs(created_at);
-
-            -- 纯记录区：备忘/提醒/事实陈述，不走分析链路
-            CREATE TABLE IF NOT EXISTS memos (
-                id            INTEGER PRIMARY KEY AUTOINCREMENT,
-                raw           TEXT NOT NULL,
-                source        TEXT DEFAULT 'api',
-                keywords_json TEXT DEFAULT '[]',
-                metadata_json TEXT DEFAULT '{}',
-                created_at    DATETIME DEFAULT CURRENT_TIMESTAMP
-            );
-
-            -- 暂存合并区：未说完的内容，等待 flush 后合并为 entry
-            CREATE TABLE IF NOT EXISTS capture_buffer (
-                id                INTEGER PRIMARY KEY AUTOINCREMENT,
-                buffer_session_id TEXT NOT NULL,
-                raw               TEXT NOT NULL,
-                source            TEXT DEFAULT 'api',
-                metadata_json     TEXT DEFAULT '{}',
-                flushed           INTEGER DEFAULT 0,
-                entry_id          INTEGER,
-                created_at        DATETIME DEFAULT CURRENT_TIMESTAMP
-            );
-
-            CREATE INDEX IF NOT EXISTS idx_memos_created         ON memos(created_at);
-            CREATE INDEX IF NOT EXISTS idx_buffer_session        ON capture_buffer(buffer_session_id);
-            CREATE INDEX IF NOT EXISTS idx_buffer_source_flushed ON capture_buffer(source, flushed);
         """)
         # 存量表迁移
         pt_cols = {row[1] for row in conn.execute("PRAGMA table_info(pipeline_traces)").fetchall()}

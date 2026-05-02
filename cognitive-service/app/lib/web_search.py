@@ -26,9 +26,9 @@ async def web_search(query: str, max_results: int = 5) -> dict:
     api_key = os.getenv("TAVILY_API_KEY", "").strip()
     if not api_key:
         return {
-            "error": "web_search 未配置（缺少 TAVILY_API_KEY）",
+            "error": "web_search not configured (TAVILY_API_KEY missing)",
             "results": [],
-            "summary": "（web_search 未配置，跳过此次调用）",
+            "summary": "(web_search not configured; skipping this call)",
         }
 
     max_results = max(1, min(max_results, 10))
@@ -47,11 +47,11 @@ async def web_search(query: str, max_results: int = 5) -> dict:
             resp.raise_for_status()
             data = resp.json()
     except httpx.TimeoutException:
-        return {"error": "web_search 超时", "results": [], "summary": "（搜索超时）"}
+        return {"error": "web_search timed out", "results": [], "summary": "(search timed out)"}
     except httpx.HTTPStatusError as e:
-        return {"error": f"web_search HTTP {e.response.status_code}", "results": [], "summary": "（搜索失败）"}
+        return {"error": f"web_search HTTP {e.response.status_code}", "results": [], "summary": "(search failed)"}
     except Exception as e:
-        return {"error": f"web_search 异常: {e}", "results": [], "summary": "（搜索异常）"}
+        return {"error": f"web_search exception: {e}", "results": [], "summary": "(search exception)"}
 
     results = []
     for r in data.get("results", []):
@@ -64,17 +64,17 @@ async def web_search(query: str, max_results: int = 5) -> dict:
     answer = (data.get("answer") or "").strip()
     return {
         "results": results,
-        "summary": answer or f"找到 {len(results)} 条结果",
+        "summary": answer or f"{len(results)} results",
     }
 
 
 def format_results(results: list[dict], summary: str) -> str:
     """Format web results as text for the agent's tool message."""
     if not results:
-        return summary or "（无结果）"
+        return summary or "(no results)"
     lines = []
     if summary:
-        lines.append(f"**速览：** {summary}\n")
+        lines.append(f"**TL;DR:** {summary}\n")
     for i, r in enumerate(results, 1):
         lines.append(f"[{i}] **{r['title']}**")
         lines.append(f"    {r['url']}")

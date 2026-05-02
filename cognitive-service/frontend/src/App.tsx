@@ -157,8 +157,6 @@ export default function App() {
           }}>
             <StatBit label={t('stats.entries')} value={stats.entries} />
             <div style={{ width: '100%', height: 1, background: 'var(--border)' }} />
-            <StatBit label={t('stats.memos')} value={stats.memos ?? 0} />
-            <div style={{ width: '100%', height: 1, background: 'var(--border)' }} />
             <StatBit label={t('stats.nodes')} value={stats.nodes} />
             <div style={{ width: '100%', height: 1, background: 'var(--border)' }} />
             <StatBit label={t('stats.edges')} value={stats.edges} />

@@ -32,9 +32,9 @@ async function callService(
 
 export default definePluginEntry({
   id: "cognitive",
-  name: "Cognitive Memory",
+  name: "Engram Cognitive Memory",
   description:
-    "Personal cognitive runtime for capturing raw entries into memory.",
+    "Capture the user's thoughts and reflections into Engram, and query their cognitive graph for personalized self-analysis.",
 
   register(api) {
     const serviceUrl =
@@ -46,35 +46,28 @@ export default definePluginEntry({
       "before_prompt_build",
       () => ({
         prependSystemContext: [
-          "You have access to native Cognitive Memory runtime tools from the `cognitive` plugin.",
-          "These are runtime tool calls, not shell commands, curl commands, or exec tasks.",
-          "Never use exec, shell, terminal, curl, or `openclaw ...` commands for cognitive memory work.",
+          "You have access to two native Engram cognitive tools from the `cognitive` plugin.",
+          "These are runtime tool calls — never use exec, shell, terminal, curl, or `openclaw ...` commands for cognitive memory work.",
           "",
-          "## When to capture",
-          "Call `cognitive_capture_memory` when the user explicitly asks to record something in any of these scenarios:",
-          "- **Note / memo**: reminders, to-dos, things to follow up on, or anything the user wants to keep track of.",
-          "- **Cognitive record**: personal observations, judgments, reflections, beliefs, or lessons learned.",
-          "- **Inspiration**: sudden ideas, creative sparks, hypotheses, or insights the user wants to preserve.",
+          "## What Engram is",
+          "Engram stores ONLY cognitive content: thoughts, reflections, ideas, decisions, observations, emotional self-analysis — anything that reveals how the user thinks.",
+          "Engram is NOT a notes / journal / todo / reminder app. The backend intent gate will reject pure event logs, factual statements, or schedule items.",
           "",
-          "Do NOT call the capture tool for casual conversation, questions, or requests that are not explicitly about saving something.",
+          "## When to capture (call `cognitive_capture_thought`)",
+          "Call when the user is expressing how they think or feel — sharing a reflection, an idea, a self-observation, a decision-in-progress, or an emotional experience they're processing. Any first-person sentence carrying interpretation, judgment, or self-observation qualifies.",
           "",
-          "## When to query",
-          "Call `cognitive_query` when the user asks a question that involves their own personality, values, cognitive patterns, decision tendencies, or explicitly mentions using their cognitive system, profile, or memory graph.",
-          "Trigger phrases include: '结合我的画像', '根据我的认知', '用我的认知系统', '分析我', '我的性格', '我的价值观', or any question asking for personalized self-analysis.",
-          "Set `continue_last: true` when the user references any prior conversation, regardless of how long ago — e.g. '接着刚才', '继续上次', '接上次的话题', '昨天聊的', '上个月说的', '之前那个问题', or any phrasing that implies picking up from a previous exchange. For everything else — any new standalone question — set `continue_last: false` (default).",
+          "## When NOT to capture",
+          "Do NOT call the capture tool for pure event logs (what they ate, how far they ran), reminders or schedule items, or casual conversation that isn't about saving a thought. If unsure, lean toward calling capture — the backend rejects off-spec inputs and tells the user how to rephrase.",
+          "",
+          "## When to query (call `cognitive_query`)",
+          "Call when the user asks for personalized self-analysis grounded in their cognitive profile, prior reflections, or memory graph.",
+          "Set `continue_last: true` when the user is picking up an earlier conversation; otherwise leave it false.",
           "",
           "## Capture rules",
-          "- Pass the user's original text to `content` EXACTLY as written. Do not rewrite, summarize, distill, complete, or add anything — including continuation signals ('我还没说完', '接着说') and recording-intent phrases ('单纯记录一下', '备忘一下'). The downstream system reads these signals directly.",
-          "- CRITICAL: Never generate, infer, or complete content on behalf of the user. If the message is long, pass the full original text unchanged. Do not add a conclusion, summary, or any sentence that the user did not literally say.",
-          "- Call `cognitive_capture_memory` once per user message, immediately. Do not wait, hold, or merge across messages.",
+          "- Pass the user's original text to `content` EXACTLY as written. Do not rewrite, summarize, distill, or complete. The downstream system reads the user's verbatim words.",
+          "- CRITICAL: Never generate, infer, or complete content on behalf of the user. If the message is long, pass the full original text unchanged. Do not add a sentence the user did not literally say.",
+          "- Call `cognitive_capture_thought` once per qualifying user message, immediately. Do not wait, hold, or merge across messages.",
           "- Do not confirm something was remembered unless the tool call succeeded.",
-          "",
-          "## Quality gate",
-          "Before calling the tool, apply a quick quality check:",
-          "- Discard and reply '这条内容太短，没有记录。' only if the content is extremely short (< 15 chars) AND is purely an interjection or filler with no specific referent (e.g. '好烦', '哈哈哈', '嗯').",
-          "- Ask one clarifying question only if the content has a clear intent but is missing essential context that cannot be inferred (e.g. no subject, no situation). Wait for the user's reply, then merge and write as one entry.",
-          "- In all other cases, write immediately without asking.",
-          "Err on the side of writing. Only discard or ask when it is obviously necessary.",
         ].join("\n"),
       }),
       { priority: 100 }
@@ -83,20 +76,21 @@ export default definePluginEntry({
     api.registerTool({
       name: "cognitive_query",
       description:
-        "Query the user's personal cognitive graph for deep analysis. Use when the user asks questions involving their personality, values, cognitive patterns, decision-making tendencies, or explicitly asks to analyze using their cognitive system or profile.",
+        "Query the user's personal cognitive graph for personalized self-analysis. Use when the user asks about their own personality, values, cognitive patterns, decision-making tendencies, or explicitly invokes their cognitive profile.",
       parameters: Type.Object({
         question: Type.String({
           description: "The user's question or topic to analyze.",
         }),
         mode: Type.Optional(
           Type.Union([Type.Literal("full"), Type.Literal("fast")], {
-            description: "full (default): baseline + persona + graph + synthesis. fast: graph + synthesis only.",
+            description:
+              "full (default): baseline + persona + graph + synthesis. fast: graph + synthesis only.",
           })
         ),
         continue_last: Type.Optional(
           Type.Boolean({
             description:
-              "Set true when the user references any prior conversation regardless of when ('接着刚才', '昨天聊的', '上个月说的', '之前那个话题', etc.). Set false (default) for any new standalone question.",
+              "Set true when the user is picking up an earlier conversation. Set false (default) for any new standalone question.",
           })
         ),
       }),
@@ -111,9 +105,12 @@ export default definePluginEntry({
         let sessionId: string | undefined;
 
         if (continueSession) {
-          const latest = await callService(serviceUrl, "/query/latest-session", undefined, "GET") as {
-            session_id: string | null;
-          };
+          const latest = (await callService(
+            serviceUrl,
+            "/query/latest-session",
+            undefined,
+            "GET"
+          )) as { session_id: string | null };
           if (latest.session_id) {
             sessionId = latest.session_id;
             console.log(`[cognitive] continuing session=${sessionId}`);
@@ -135,7 +132,7 @@ export default definePluginEntry({
           throw new Error(`Query service error ${resp.status}: ${text}`);
         }
 
-        // Consume NDJSON stream, collect graph_insight deltas as the final answer
+        // Consume NDJSON stream, collect graph_insight deltas as the final answer.
         const text = await resp.text();
         const lines = text.split("\n").filter((l) => l.trim());
 
@@ -173,7 +170,7 @@ export default definePluginEntry({
           content: [
             {
               type: "text" as const,
-              text: insight || "（图谱暂无相关内容）",
+              text: insight || "(no relevant content in graph)",
             },
           ],
         };
@@ -181,57 +178,57 @@ export default definePluginEntry({
     });
 
     api.registerTool({
-      name: "cognitive_capture_memory",
+      name: "cognitive_capture_thought",
       description:
-        "Primary native cognitive memory write tool for raw text capture. Preserve the user's text verbatim and store exactly one entry unless the user explicitly asks to split it.",
+        "Capture a thought, reflection, idea, observation, decision, or emotional self-analysis into the Engram cognitive graph. Use ONLY when the user is expressing how they THINK or FEEL — not for events, plans, reminders, or factual logs (Engram is not a notes app). Pass the user's text EXACTLY as written.",
       parameters: Type.Object({
         type: Type.Literal("text"),
         content: Type.String({
           description:
-            "EXACT copy of what the user said or typed — every word, every character, unchanged. Do NOT paraphrase, summarize, complete, or add anything. If the user spoke 500 words, this field must contain all 500 words. If you find yourself writing a sentence the user did not literally say, stop and delete it.",
+            "EXACT copy of what the user said or typed — every word unchanged. Do NOT paraphrase, summarize, complete, or add anything. If the user spoke 500 words, this field must contain all 500 words.",
         }),
-        memory_type: Type.Optional(
-          Type.Union([
-            Type.Literal("thought"),
-            Type.Literal("reflection"),
-            Type.Literal("idea"),
-            Type.Literal("behavior"),
-            Type.Literal("emotion"),
-            Type.Literal("event"),
-            Type.Literal("lesson"),
-          ])
-        ),
         source: Type.Optional(Type.String()),
-        context: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
-        metadata: Type.Optional(Type.Record(Type.String(), Type.Unknown())),
-        mood: Type.Optional(Type.String()),
+        mood: Type.Optional(
+          Type.String({
+            description:
+              "Optional one-word mood tag the user explicitly mentioned (e.g. anxious, hopeful).",
+          })
+        ),
         tags: Type.Optional(Type.Array(Type.String())),
       }),
       async execute(_id, params) {
         console.log(
-          `[cognitive] tool cognitive_capture_memory invoked type=${params.type} memoryType=${params.memory_type ?? ""} contentLength=${params.content.length}`
+          `[cognitive] tool cognitive_capture_thought invoked contentLength=${params.content.length}`
         );
-        const result = await callService(serviceUrl, "/capture", params) as {
-          track: string;
+        const result = (await callService(serviceUrl, "/capture", {
+          ...params,
+          source: params.source ?? "openclaw",
+        })) as {
+          track: "entry" | "reject";
           id: number | null;
-          buffer_session_id: string | null;
-          flushed_entry_id: number | null;
           reason: string;
         };
-        console.log(`[cognitive] tool cognitive_capture_memory completed track=${result.track} id=${result.id}`);
-        const trackLabel: Record<string, string> = {
-          entry: "认知记录",
-          memo: "备忘",
-          buffer: "暂存（等待续写）",
-          buffer_flushed: "缓冲已合并入认知记录",
-        };
-        const label = trackLabel[result.track] ?? result.track;
-        const idPart = result.id != null ? ` #${result.id}` : (result.buffer_session_id ? ` buffer:${result.buffer_session_id.slice(0, 8)}` : "");
+        console.log(
+          `[cognitive] tool cognitive_capture_thought completed track=${result.track} id=${result.id}`
+        );
+
+        if (result.track === "reject") {
+          const hint = result.reason ? ` 提示：${result.reason}` : "";
+          return {
+            content: [
+              {
+                type: "text" as const,
+                text: `未记录——这条像是事件流水或备忘，不是思考内容。${hint}`,
+              },
+            ],
+          };
+        }
+
         return {
           content: [
             {
               type: "text" as const,
-              text: `已${label}${idPart}`,
+              text: `已记录 #${result.id}`,
             },
           ],
         };

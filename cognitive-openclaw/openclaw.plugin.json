@@ -1,7 +1,7 @@
 {
   "id": "cognitive",
-  "name": "Cognitive Memory",
-  "description": "Capture raw entries, retrieve stable facts, surface repeated patterns, read lens-based analyses, and get personalized guidance",
+  "name": "Engram Cognitive Memory",
+  "description": "Capture the user's thoughts and reflections into Engram, and query their cognitive graph for personalized self-analysis. Engram is not a notes app — pure event logs are rejected at the gate.",
   "skills": ["skills"],
   "configSchema": {
     "type": "object",

@@ -190,18 +190,6 @@ export interface Stats {
   nodes: number
   edges: number
   activations: number
-  memos: number
-}
-
-// ── Memos ─────────────────────────────────────────────────────────────────────
-
-export interface Memo {
-  id: number
-  raw: string
-  source: string
-  keywords: string[]
-  metadata: Record<string, unknown>
-  created_at: string
 }
 
 // ── Trace ─────────────────────────────────────────────────────────────────────

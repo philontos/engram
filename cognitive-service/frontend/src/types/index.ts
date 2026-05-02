@@ -73,6 +73,8 @@ export interface GraphNode {
     user_relevance: string
     factual_summary: string
     last_activated: string
+    neighbor_count?: number
+    unexpanded_count?: number
   }
 }
 
@@ -131,13 +133,32 @@ export interface Activation {
 
 // ── Query Logs ────────────────────────────────────────────────────────────────
 
+export interface ToolCallTrace {
+  round: number
+  tool: string
+  args: Record<string, unknown>
+  summary?: string
+  node_count?: number
+  preview?: string
+}
+
+export interface ThemeRecall {
+  node_label: string
+  node_domain: string
+  strength: number
+  entries: { id: number; date: string; raw: string }[]
+}
+
 export interface QueryTurn {
   question: string
   intent: 'proceed' | 'off_topic' | 'clarify'
+  mode?: 'factual' | 'reflective' | 'exploratory'
   response: string
   q1_text?: string
   q2_text?: string
   history_context?: string
+  tool_calls?: ToolCallTrace[]
+  theme_recall?: ThemeRecall[]
   created_at: string
 }
 

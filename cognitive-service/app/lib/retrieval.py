@@ -1,6 +1,6 @@
 """消费层召回：正向 top-k + 对立邻居 + 盲区候选 + 子图展开。
 
-对立召回不做反向 embedding（语义不稳），而是利用图中已有的"对立"边从正向节点跳出。
+对立召回不做反向 embedding（语义不稳），而是利用图中已有的"opposes"边从正向节点跳出。
 """
 
 import json
@@ -83,7 +83,7 @@ def positive_retrieval(
 
 
 def opposite_retrieval(seed_nodes: list[dict]) -> list[dict]:
-    """沿图中 '对立' 边从 seed_nodes 跳 1 跳，返回对立邻居。"""
+    """沿图中 'opposes' 边从 seed_nodes 跳 1 跳，返回对立邻居。"""
     seed_ids = {n["id"] for n in seed_nodes if n.get("id")}
     if not seed_ids:
         return []
@@ -102,7 +102,7 @@ def opposite_retrieval(seed_nodes: list[dict]) -> list[dict]:
                           WHEN e.from_node_id IN ({placeholders}) THEN e.to_node_id
                           ELSE e.from_node_id
                         END
-            WHERE e.relation_type = '对立'
+            WHERE e.relation_type = 'opposes'
               AND (e.from_node_id IN ({placeholders}) OR e.to_node_id IN ({placeholders}))
             """,
             (*seed_ids, *seed_ids, *seed_ids),
@@ -145,7 +145,7 @@ def find_blindspots(seed_nodes: list[dict], min_strength: float = 0.5) -> list[d
                               ELSE to_node_id
                             END AS node_id
             FROM backbone_edges
-            WHERE relation_type = '对立'
+            WHERE relation_type = 'opposes'
               AND (from_node_id IN ({placeholders}) OR to_node_id IN ({placeholders}))
             """,
             (*ids, *ids, *ids),
@@ -159,7 +159,7 @@ def expand_subgraph(seed_nodes: list[dict], hop_per_relation: dict[str, int] | N
 
     默认：对立 2-hop（矛盾放大）、推导 3-hop（因果链）、支撑 2-hop（背景）、相似 1-hop（跨域）。
     """
-    hops = hop_per_relation or {"对立": 2, "推导": 3, "支撑": 2, "相似": 1}
+    hops = hop_per_relation or {"opposes": 2, "derives": 3, "supports": 2, "similar": 1}
     seed_ids = [n["id"] for n in seed_nodes if n.get("id")]
     if not seed_ids:
         return {"nodes": [], "edges": []}

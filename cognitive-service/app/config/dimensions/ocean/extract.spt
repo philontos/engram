@@ -11,7 +11,7 @@ ${profile_summary}
 - Dimensions with no signal: set confidence to 0.05, score to 50 (these will be filtered by the system and will not affect the profile)
 - When a signal IS present, be willing to score away from 50 — below 50 means the trait is weak, above 50 means it is strong; do not hedge toward 50 out of uncertainty
 - Low overall confidence for a single input is normal — do not inflate
-- evidence: cite only specific evidence from this input, max 15 Chinese characters
+- evidence: cite only specific evidence from this input, max 15 characters
 
 ## Scoring rubric per dimension
 ${rubric}

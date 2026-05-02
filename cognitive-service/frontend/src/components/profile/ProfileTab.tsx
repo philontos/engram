@@ -6,23 +6,25 @@ import type { ProfileDimension, SubDimValue, SubSource, DimensionSchema } from '
 import { SCHWARTZ_COLORS } from '@/lib/constants'
 import { useDimensionSchemas, getDimSchema } from '@/lib/useDimensionSchemas'
 import { fmtTime } from '@/lib/utils'
+import { useI18n } from '@/i18n'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 
 type ProfileView = 'current' | 'evolution'
 
 export function ProfileTab() {
+  const { t } = useI18n()
   const [view, setView] = useState<ProfileView>('current')
   const { data: dims = [], isLoading } = useQuery({ queryKey: ['profile'], queryFn: fetchProfile })
   const { data: evolution } = useQuery({ queryKey: ['profile-evolution'], queryFn: fetchProfileEvolution })
   const schemas = useDimensionSchemas()
 
   if (isLoading) return (
-    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', fontSize: 13 }}>加载中…</div>
+    <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', fontSize: 13 }}>{t('profile.loading')}</div>
   )
 
   if (!dims.length) return (
     <div style={{ height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', fontSize: 13 }}>
-      暂无画像数据，请先处理一些记忆
+      {t('profile.empty')}
     </div>
   )
 
@@ -37,7 +39,7 @@ export function ProfileTab() {
               background: view === v ? 'var(--accent)' : 'var(--surface2)',
               color: view === v ? '#fff' : 'var(--text3)',
             }}>
-            {v === 'current' ? '当前画像' : '演化时间线'}
+            {v === 'current' ? t('profile.current') : t('profile.timeline')}
           </button>
         ))}
       </div>
@@ -54,7 +56,7 @@ export function ProfileTab() {
         <EvolutionPanel evolution={evolution} />
       )}
       {view === 'evolution' && !evolution && (
-        <div style={{ color: 'var(--text3)', fontSize: 13 }}>加载中…</div>
+        <div style={{ color: 'var(--text3)', fontSize: 13 }}>{t('profile.loading')}</div>
       )}
     </div>
   )
@@ -76,6 +78,7 @@ function ProfileCard({ title, subtitle, children }: { title: string; subtitle?: 
 }
 
 function SourceList({ sources }: { sources: SubSource[] }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   if (!sources.length) return null
   return (
@@ -83,7 +86,7 @@ function SourceList({ sources }: { sources: SubSource[] }) {
       <button onClick={() => setOpen(v => !v)}
         style={{ display: 'inline-flex', alignItems: 'center', gap: 3, background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 10, padding: '2px 0' }}>
         {open ? <ChevronDown size={10} /> : <ChevronRight size={10} />}
-        {sources.length} 条来源
+        {t('profile.sources_n', { n: sources.length })}
       </button>
       {open && (
         <div style={{ marginTop: 6, paddingLeft: 10, borderLeft: '2px solid var(--border2)', display: 'flex', flexDirection: 'column', gap: 8 }}>
@@ -91,8 +94,8 @@ function SourceList({ sources }: { sources: SubSource[] }) {
             <div key={i} style={{ fontSize: 11 }}>
               <div style={{ display: 'flex', gap: 10, alignItems: 'center', color: 'var(--text3)', marginBottom: 2 }}>
                 <span style={{ color: 'var(--accent2)' }}>#{s.entry_id}</span>
-                <span>分={s.score}</span>
-                <span>置信={s.confidence.toFixed(2)}</span>
+                <span>{t('profile.score_label')}={s.score}</span>
+                <span>{t('profile.confidence_label')}={s.confidence.toFixed(2)}</span>
                 <span>{fmtTime(s.created_at)}</span>
               </div>
               {s.evidence && <div style={{ color: 'var(--text3)', lineHeight: 1.5 }}>{s.evidence}</div>}
@@ -105,6 +108,7 @@ function SourceList({ sources }: { sources: SubSource[] }) {
 }
 
 function DimensionCard({ dim, schema }: { dim: ProfileDimension; schema: DimensionSchema | undefined }) {
+  const { t } = useI18n()
   const c = dim.content
   const fmt = schema?.summary_format ?? 'free'
   const title = schema?.name ?? dim.dimension
@@ -117,7 +121,7 @@ function DimensionCard({ dim, schema }: { dim: ProfileDimension; schema: Dimensi
       ? [...entries].sort(([a], [b]) => ((c[b] as SubDimValue | null)?.score ?? 0) - ((c[a] as SubDimValue | null)?.score ?? 0))
       : entries
     return (
-      <ProfileCard title={title} subtitle={`基于 ${dim.sample_count} 条记忆`}>
+      <ProfileCard title={title} subtitle={t('profile.based_on_n', { n: dim.sample_count })}>
         <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
           {sorted.map(([k, name], i) => {
             const v = (c[k] as SubDimValue | null) ?? { score: 50, confidence: 0 }
@@ -149,7 +153,7 @@ function DimensionCard({ dim, schema }: { dim: ProfileDimension; schema: Dimensi
     return (
       <ProfileCard title={title}>
         {rows.length === 0
-          ? <div style={{ fontSize: 12, color: 'var(--text3)' }}>暂无数据</div>
+          ? <div style={{ fontSize: 12, color: 'var(--text3)' }}>{t('profile.no_data')}</div>
           : (
             <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
               {rows.map(([k, v]) => {
@@ -170,7 +174,7 @@ function DimensionCard({ dim, schema }: { dim: ProfileDimension; schema: Dimensi
   }
 
   return (
-    <ProfileCard title={title} subtitle={`基于 ${dim.sample_count} 条记忆`}>
+    <ProfileCard title={title} subtitle={t('profile.based_on_n', { n: dim.sample_count })}>
       <div style={{ fontSize: 11, color: 'var(--text3)', fontFamily: 'monospace' }}>
         {JSON.stringify(c, null, 2).substring(0, 300)}
       </div>
@@ -188,12 +192,13 @@ function EvolutionChart({ title, series }: {
   title: string
   series: { key: string; label: string; color: string; points: EvolutionPoint[] }[]
 }) {
+  const { t } = useI18n()
   const allIds = Array.from(
     new Set(series.flatMap(s => s.points.map(p => p.entry_id)))
   ).sort((a, b) => a - b)
 
   if (allIds.length === 0) return (
-    <div style={{ color: 'var(--text3)', fontSize: 12 }}>暂无数据</div>
+    <div style={{ color: 'var(--text3)', fontSize: 12 }}>{t('profile.no_data')}</div>
   )
 
   const W = 620, H = 220, PL = 32, PR = 12, PT = 12, PB = 32
@@ -248,6 +253,7 @@ function EvolutionChart({ title, series }: {
 }
 
 function EvolutionPanel({ evolution }: { evolution: ProfileEvolution }) {
+  const { t } = useI18n()
   const oceanSeries = Object.entries(evolution.ocean).map(([k, pts]) => ({
     key: k, label: k,
     color: OCEAN_COLORS[k] || '#888', points: pts,
@@ -259,13 +265,13 @@ function EvolutionPanel({ evolution }: { evolution: ProfileEvolution }) {
   }))
 
   if (oceanSeries.length === 0 && schwartzSeries.length === 0) return (
-    <div style={{ color: 'var(--text3)', fontSize: 13 }}>暂无演化数据</div>
+    <div style={{ color: 'var(--text3)', fontSize: 13 }}>{t('profile.no_evolution')}</div>
   )
 
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignContent: 'flex-start' }}>
-      {oceanSeries.length > 0 && <EvolutionChart title="OCEAN 人格演化" series={oceanSeries} />}
-      {schwartzSeries.length > 0 && <EvolutionChart title="Schwartz 价值观演化" series={schwartzSeries} />}
+      {oceanSeries.length > 0 && <EvolutionChart title={t('profile.chart_ocean')} series={oceanSeries} />}
+      {schwartzSeries.length > 0 && <EvolutionChart title={t('profile.chart_schwartz')} series={schwartzSeries} />}
     </div>
   )
 }

@@ -35,9 +35,9 @@ def get_mood_stats() -> str:
     tod_parts = ", ".join(
         f"{t}({c})" for t, c in sorted(tod_dist.items(), key=lambda x: -x[1])
     )
-    lines = [f"情绪分布({total}条): {mood_parts}"]
+    lines = [f"Mood distribution ({total} entries): {mood_parts}"]
     if tod_parts:
-        lines.append(f"记录时段: {tod_parts}")
+        lines.append(f"Recording times: {tod_parts}")
     return "\n".join(lines)
 
 
@@ -86,7 +86,7 @@ def get_profile_summary() -> str:
         ).fetchall()
 
     if not rows:
-        return "（暂无历史画像）"
+        return "(no historical profile yet)"
 
     parts = []
     for row in rows:
@@ -94,7 +94,7 @@ def get_profile_summary() -> str:
         if line:
             parts.append(line)
 
-    return "\n".join(parts) if parts else "（暂无历史画像）"
+    return "\n".join(parts) if parts else "(no historical profile yet)"
 
 
 
@@ -137,15 +137,15 @@ async def generate_slice(entry_id: int, raw: str) -> int | None:
     if erow:
         ctx_parts = []
         if erow["memory_type"]:
-            ctx_parts.append(f"类型: {erow['memory_type']}")
+            ctx_parts.append(f"type: {erow['memory_type']}")
         if erow["mood"]:
-            ctx_parts.append(f"情绪: {erow['mood']}")
+            ctx_parts.append(f"mood: {erow['mood']}")
         try:
             meta = json.loads(erow["metadata_json"] or "{}")
             wd = meta.get("weekday", "")
             tod = meta.get("time_of_day", "")
             if wd or tod:
-                ctx_parts.append(f"时间: {(wd + ' ' + tod).strip()}")
+                ctx_parts.append(f"time: {(wd + ' ' + tod).strip()}")
         except Exception:
             pass
         if ctx_parts:
@@ -257,4 +257,4 @@ def get_slice_summary(slice_id: int) -> str:
         if line:
             parts.append(line)
 
-    return "\n".join(parts) if parts else "（切片为空）"
+    return "\n".join(parts) if parts else "(slice is empty)"

@@ -8,13 +8,14 @@ from fastapi import APIRouter, HTTPException
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel
 
-from app.lib.config_loader import DIMENSIONS
+from app.lib.config_loader import BACKBONES, DIMENSIONS, detect_orphan_domains
 from app.lib.db import get_conn
 from app.lib.vector_store import VECTOR_INDEX_PATH, get_store
 
 router = APIRouter(prefix="/ui/api")
 
 _DIM_INTERNAL_KEYS = {"_dir", "_prompt", "_rubric", "prompt_template"}
+_BB_INTERNAL_KEYS = {"_dir", "_internal_node_prompt", "_focus_hints_text"}
 
 
 @router.get("/dimensions")
@@ -24,6 +25,18 @@ def list_dimensions():
         for dim in DIMENSIONS
         if dim.get("enabled", True)
     ]
+
+
+@router.get("/backbones")
+def list_backbones():
+    """Frontend-facing backbone catalog. Drives domain filter buttons, colors, and labels."""
+    return {
+        "backbones": [
+            {k: v for k, v in bb.items() if k not in _BB_INTERNAL_KEYS}
+            for bb in BACKBONES
+        ],
+        "orphan_domains": detect_orphan_domains(),
+    }
 
 
 @router.get("/stats")
@@ -141,6 +154,187 @@ def entry_detail(entry_id: int):
         ],
         "activations": [dict(a) for a in activations],
     }
+
+
+def _serialize_node(r, neighbor_count: int, loaded_neighbor_count: int) -> dict:
+    cache = {}
+    if r["content_cache_json"]:
+        try:
+            cache = json.loads(r["content_cache_json"])
+        except Exception:
+            pass
+    return {
+        "data": {
+            "id":               f"n{r['id']}",
+            "db_id":            r["id"],
+            "label":            r["label"],
+            "node_type":        r["node_type"],
+            "domain":           r["domain"],
+            "origin":           r["origin"] or "internal",
+            "weight":           r["strength"],
+            "activation_count": r["hit_count"],
+            "source_entries":   json.loads(r["source_entry_ids"] or "[]"),
+            "user_relevance":   r["user_relevance"] or "",
+            "factual_summary":  cache.get("factual_summary", ""),
+            "last_activated":   r["last_activated"] or "",
+            "neighbor_count":   neighbor_count,
+            "unexpanded_count": max(0, neighbor_count - loaded_neighbor_count),
+        }
+    }
+
+
+def _serialize_edge(r) -> dict:
+    return {
+        "data": {
+            "id":             f"e{r['id']}",
+            "source":         f"n{r['from_node_id']}",
+            "target":         f"n{r['to_node_id']}",
+            "relation":       r["relation_type"],
+            "weight":         r["weight"],
+            "confidence":     r["confidence"],
+            "source_entries": json.loads(r["source_entry_ids"] or "[]"),
+        }
+    }
+
+
+@router.get("/graph/seed")
+def graph_seed(domain: str = "", limit: int = 24):
+    """初始焦点视图：返回强度最高的 limit 个节点 + 它们之间的边。"""
+    limit = max(1, min(limit, 200))
+    with get_conn() as conn:
+        node_query = """
+            SELECT n.id, n.domain, n.node_type, n.label, n.strength, n.origin,
+                   n.hit_count, n.description, n.content_cache_json, n.source_entry_ids,
+                   a.user_relevance, a.created_at AS last_activated
+            FROM backbone_nodes n
+            LEFT JOIN backbone_activations a ON a.id = n.current_activation_id
+        """
+        params: list = []
+        if domain:
+            node_query += " WHERE n.domain = ?"
+            params.append(domain)
+        node_query += " ORDER BY n.strength DESC LIMIT ?"
+        params.append(limit)
+        node_rows = conn.execute(node_query, params).fetchall()
+        node_ids = [r["id"] for r in node_rows]
+        if not node_ids:
+            return {"nodes": [], "edges": []}
+
+        ph = ",".join("?" * len(node_ids))
+        edge_rows = conn.execute(
+            f"""SELECT id, from_node_id, to_node_id, relation_type, weight, confidence, source_entry_ids
+                FROM backbone_edges
+                WHERE from_node_id IN ({ph}) AND to_node_id IN ({ph})""",
+            node_ids + node_ids,
+        ).fetchall()
+
+        # neighbor counts (degree) for each seed node — total degree, not just within seed
+        degree_rows = conn.execute(
+            f"""SELECT node_id, COUNT(*) AS c FROM (
+                    SELECT from_node_id AS node_id FROM backbone_edges WHERE from_node_id IN ({ph})
+                    UNION ALL
+                    SELECT to_node_id AS node_id FROM backbone_edges WHERE to_node_id IN ({ph})
+                ) GROUP BY node_id""",
+            node_ids + node_ids,
+        ).fetchall()
+        degree_map = {r["node_id"]: r["c"] for r in degree_rows}
+
+        # edges within seed contribute to "loaded_neighbor_count" — counted from each side
+        loaded_map: dict[int, int] = {}
+        seed_set = set(node_ids)
+        for e in edge_rows:
+            if e["from_node_id"] in seed_set and e["to_node_id"] in seed_set:
+                loaded_map[e["from_node_id"]] = loaded_map.get(e["from_node_id"], 0) + 1
+                loaded_map[e["to_node_id"]] = loaded_map.get(e["to_node_id"], 0) + 1
+
+    nodes = [
+        _serialize_node(r, degree_map.get(r["id"], 0), loaded_map.get(r["id"], 0))
+        for r in node_rows
+    ]
+    edges = [_serialize_edge(r) for r in edge_rows]
+    return {"nodes": nodes, "edges": edges}
+
+
+@router.get("/graph/expand")
+def graph_expand(node_id: int, loaded: str = ""):
+    """展开某节点的邻居：返回新邻居节点 + 所有连到已加载节点的边。
+
+    loaded: 当前已加载的节点 db_id 列表，逗号分隔。新邻居 = 直接相邻 - 已加载。
+    """
+    loaded_ids = {int(x) for x in loaded.split(",") if x.strip().isdigit()}
+    loaded_ids.add(node_id)
+
+    with get_conn() as conn:
+        # 找所有直接邻居（从 edges 双向）
+        neighbor_rows = conn.execute(
+            """SELECT DISTINCT to_node_id AS nid FROM backbone_edges WHERE from_node_id = ?
+               UNION
+               SELECT DISTINCT from_node_id AS nid FROM backbone_edges WHERE to_node_id = ?""",
+            (node_id, node_id),
+        ).fetchall()
+        neighbor_ids = [r["nid"] for r in neighbor_rows]
+        new_ids = [nid for nid in neighbor_ids if nid not in loaded_ids]
+
+        if not new_ids:
+            return {"nodes": [], "edges": []}
+
+        ph = ",".join("?" * len(new_ids))
+        node_rows = conn.execute(
+            f"""SELECT n.id, n.domain, n.node_type, n.label, n.strength, n.origin,
+                       n.hit_count, n.description, n.content_cache_json, n.source_entry_ids,
+                       a.user_relevance, a.created_at AS last_activated
+                FROM backbone_nodes n
+                LEFT JOIN backbone_activations a ON a.id = n.current_activation_id
+                WHERE n.id IN ({ph})
+                ORDER BY n.strength DESC""",
+            new_ids,
+        ).fetchall()
+
+        # 拉所有 edges where 一端是新节点 AND 另一端在 (loaded ∪ new)
+        all_known = loaded_ids | set(new_ids)
+        all_ph = ",".join("?" * len(all_known))
+        new_ph = ",".join("?" * len(new_ids))
+        edge_rows = conn.execute(
+            f"""SELECT id, from_node_id, to_node_id, relation_type, weight, confidence, source_entry_ids
+                FROM backbone_edges
+                WHERE (from_node_id IN ({new_ph}) AND to_node_id IN ({all_ph}))
+                   OR (to_node_id IN ({new_ph}) AND from_node_id IN ({all_ph}))""",
+            new_ids + list(all_known) + new_ids + list(all_known),
+        ).fetchall()
+        # 去重
+        seen_eids = set()
+        unique_edges = []
+        for e in edge_rows:
+            if e["id"] not in seen_eids:
+                seen_eids.add(e["id"])
+                unique_edges.append(e)
+
+        # 给每个新节点算 degree 和已加载邻居数（基于 all_known + new_ids）
+        all_known_after = all_known
+        degree_rows = conn.execute(
+            f"""SELECT node_id, COUNT(*) AS c FROM (
+                    SELECT from_node_id AS node_id FROM backbone_edges WHERE from_node_id IN ({new_ph})
+                    UNION ALL
+                    SELECT to_node_id AS node_id FROM backbone_edges WHERE to_node_id IN ({new_ph})
+                ) GROUP BY node_id""",
+            new_ids + new_ids,
+        ).fetchall()
+        degree_map = {r["node_id"]: r["c"] for r in degree_rows}
+
+        loaded_map: dict[int, int] = {}
+        for e in unique_edges:
+            if e["from_node_id"] in all_known_after and e["to_node_id"] in all_known_after:
+                if e["from_node_id"] in new_ids:
+                    loaded_map[e["from_node_id"]] = loaded_map.get(e["from_node_id"], 0) + 1
+                if e["to_node_id"] in new_ids:
+                    loaded_map[e["to_node_id"]] = loaded_map.get(e["to_node_id"], 0) + 1
+
+    nodes = [
+        _serialize_node(r, degree_map.get(r["id"], 0), loaded_map.get(r["id"], 0))
+        for r in node_rows
+    ]
+    edges = [_serialize_edge(r) for r in unique_edges]
+    return {"nodes": nodes, "edges": edges}
 
 
 @router.get("/graph")
@@ -275,6 +469,89 @@ def entry_trace(entry_id: int):
     if not row:
         return {"entry_id": entry_id, "trace": None}
     return {"entry_id": entry_id, "updated_at": row["updated_at"], "trace": json.loads(row["trace_json"])}
+
+
+def _build_trace_bundle(entry_row, trace_row) -> dict:
+    """组装单条 entry 的完整 trace bundle（entry + trace + rollback）。"""
+    def _j(v):
+        try:
+            return json.loads(v) if v else None
+        except Exception:
+            return v
+
+    entry = {
+        "id":                entry_row["id"],
+        "created_at":        entry_row["created_at"],
+        "type":              entry_row["type"],
+        "raw":               entry_row["raw"],
+        "source":            entry_row["source"],
+        "memory_type":       entry_row["memory_type"],
+        "mood":              entry_row["mood"],
+        "tags":              _j(entry_row["tags"]) or [],
+        "context":           _j(entry_row["context_json"]) or {},
+        "metadata":          _j(entry_row["metadata_json"]) or {},
+        "processing_status": entry_row["processing_status"],
+    }
+    if trace_row is None:
+        return {"entry": entry, "trace": None, "rollback": None, "trace_updated_at": None}
+    return {
+        "entry":            entry,
+        "trace":            _j(trace_row["trace_json"]),
+        "rollback":         _j(trace_row["rollback_json"]),
+        "trace_updated_at": trace_row["updated_at"],
+    }
+
+
+@router.get("/entry/{entry_id}/trace/export")
+def export_entry_trace(entry_id: int):
+    """单条 entry 的完整 process trace 下载（JSON 文件）。"""
+    with get_conn() as conn:
+        entry_row = conn.execute(
+            "SELECT id, created_at, type, raw, source, memory_type, mood, "
+            "tags, context_json, metadata_json, processing_status "
+            "FROM entries WHERE id=?",
+            (entry_id,),
+        ).fetchone()
+        if not entry_row:
+            raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
+        trace_row = conn.execute(
+            "SELECT trace_json, rollback_json, updated_at FROM pipeline_traces WHERE entry_id=?",
+            (entry_id,),
+        ).fetchone()
+
+    bundle = _build_trace_bundle(entry_row, trace_row)
+    return JSONResponse(
+        content=bundle,
+        headers={"Content-Disposition": f"attachment; filename=entry_{entry_id}_trace.json"},
+    )
+
+
+@router.get("/traces/export")
+def export_all_traces():
+    """全量 process trace 打包下载，便于离线评测。"""
+    with get_conn() as conn:
+        entry_rows = conn.execute(
+            "SELECT id, created_at, type, raw, source, memory_type, mood, "
+            "tags, context_json, metadata_json, processing_status "
+            "FROM entries ORDER BY created_at ASC"
+        ).fetchall()
+        trace_rows = conn.execute(
+            "SELECT entry_id, trace_json, rollback_json, updated_at FROM pipeline_traces"
+        ).fetchall()
+
+    trace_by_entry = {r["entry_id"]: r for r in trace_rows}
+    items = [_build_trace_bundle(er, trace_by_entry.get(er["id"])) for er in entry_rows]
+
+    from datetime import datetime, timezone
+    return JSONResponse(
+        content={
+            "exported_at": datetime.now(timezone.utc).isoformat(),
+            "count":       len(items),
+            "with_trace":  sum(1 for it in items if it["trace"] is not None),
+            "items":       items,
+        },
+        headers={"Content-Disposition": "attachment; filename=process_traces.json"},
+    )
 
 
 @router.get("/profile/evolution")

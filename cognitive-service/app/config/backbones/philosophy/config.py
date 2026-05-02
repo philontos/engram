@@ -1,8 +1,10 @@
 BACKBONE = {
-    "key":         "哲学",
-    "description": "哲学流派、思想家、核心命题、认识论、伦理学、本体论",
+    "key":         "philosophy",
+    "name":        "Philosophy",
+    "color":       "#6366f1",
+    "description": "Philosophical schools, thinkers, core propositions, epistemology, ethics, ontology.",
     "focus_hints": [
-        "关注用户思考中隐含的哲学命题和认识论立场",
-        "优先提取能解释用户世界观和方法论的哲学节点",
+        "Surface philosophical premises and epistemic stances implicit in the user's thinking.",
+        "Prioritize nodes that explain the user's worldview and methodology.",
     ],
 }

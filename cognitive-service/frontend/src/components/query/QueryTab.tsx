@@ -1,8 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchQueryLogs, fetchQueryLog, clearQueryLogs, deleteQueryLog } from '@/api'
-import type { QueryLogDetail, QueryTurn } from '@/types'
-import { DOMAIN_COLORS } from '@/lib/constants'
+import type { QueryLogDetail, QueryTurn, ToolCallTrace, ThemeRecall } from '@/types'
+import { getDomainColor, getDomainLabel } from '@/lib/constants'
+import { useBackbones } from '@/lib/useBackbones'
+import { useI18n } from '@/i18n'
 import { fmtTime } from '@/lib/utils'
 import { Send, Square, Trash2, Clock, MessageSquarePlus } from 'lucide-react'
 import { useConfirm } from '@/components/ui/ConfirmDialog'
@@ -14,7 +16,9 @@ type ToolCall = { round: number; tool: string; args: Record<string, unknown>; su
 type ThemeEntry = { id: number; date: string; raw: string }
 type ThemeNode = { id: number; label: string; domain: string; node_type: string; origin: string; strength: number; description?: string }
 type ThemeResult = { node: ThemeNode; entries: ThemeEntry[]; analysis: string }
-type StreamPhase = { stage: string; text: string; toolCalls?: ToolCall[]; themeResults?: ThemeResult[] }
+type RawLinkedNode = { id: number; label: string; strength: number }
+type RawEntry = { id: number; date: string; raw: string; linked_nodes: RawLinkedNode[] }
+type StreamPhase = { stage: string; text: string; toolCalls?: ToolCall[]; themeResults?: ThemeResult[]; rawEntries?: RawEntry[]; rawTotalChars?: number; rawCandidatesRemaining?: number }
 type ConvTurn = { id: string; question: string; phases: StreamPhase[]; done: boolean; createdAt: number }
 type QueuedQuery = { question: string; mode: 'full' | 'fast'; sessionId: string | null }
 
@@ -38,26 +42,30 @@ function clearSession() {
   } catch { /* ignore */ }
 }
 
-const STAGE_LABELS: Record<string, string> = {
-  intent_check:      '意图识别',
-  baseline:          '通用解答',
-  persona_blindspot: '人格穿刺',
-  graph_explore:     '图谱探索',
-  theme_analysis:    '主题深析',
-  graph_insight:     '图谱洞察',
+// Stage / tool label keys are resolved through i18n at render time.
+const STAGE_LABEL_KEYS: Record<string, string> = {
+  intent_check:      'query.stage_intent',
+  baseline:          'query.stage_baseline',
+  raw_recall:        'query.stage_raw_recall',
+  persona_blindspot: 'query.stage_persona',
+  graph_explore:     'query.stage_explore',
+  graph_insight:     'query.stage_synthesis',
 }
 
 const INLINE_STAGES = new Set(['intent_check'])
 
-const TOOL_LABELS: Record<string, string> = {
-  graph_search:  '语义搜索',
-  expand_node:   '展开子图',
-  get_opposites: '寻找对立',
+const TOOL_LABEL_KEYS: Record<string, string> = {
+  graph_search:  'query.tool_graph_search',
+  expand_node:   'query.tool_expand_node',
+  get_opposites: 'query.tool_get_opposites',
+  web_search:    'query.tool_web_search',
 }
 
 
 export function QueryTab() {
   const qc = useQueryClient()
+  const { backbones } = useBackbones()
+  const { t } = useI18n()
   const [question, setQuestion] = useState('')
   const [mode, setMode]         = useState<'full' | 'fast'>('full')
   const [streaming, setStreaming] = useState(false)
@@ -191,9 +199,20 @@ export function QueryTab() {
           try {
             const evt = JSON.parse(line) as Record<string, unknown>
             if (evt.type === 'error') {
-              setError(String(evt.message || '未知错误'))
+              setError(String(evt.message || t('query.err_unknown')))
             } else if (evt.type === 'stage' && evt.status === 'start') {
               updateTurn(t => ({ ...t, phases: [...t.phases, { stage: String(evt.stage || ''), text: '', toolCalls: [] }] }))
+            } else if (evt.type === 'stage' && evt.status === 'done' && evt.stage === 'raw_recall') {
+              const entries = (evt.entries as RawEntry[] | undefined) ?? []
+              updateTurn(t => {
+                if (!t.phases.length) return t
+                const ps = [...t.phases]; const last = { ...ps[ps.length - 1] }
+                last.rawEntries = entries
+                last.rawTotalChars = Number(evt.total_chars ?? 0)
+                last.rawCandidatesRemaining = Number(evt.candidates_remaining ?? 0)
+                ps[ps.length - 1] = last
+                return { ...t, phases: ps }
+              })
             } else if (evt.type === 'delta') {
               const chunk = String(evt.delta || ''); if (!chunk) continue
               updateTurn(t => {
@@ -294,7 +313,7 @@ export function QueryTab() {
   }
 
   async function handleClearLogs() {
-    const ok = await confirm({ title: '清除查询历史', message: '所有历史记录将被永久删除。', confirmLabel: '清除', danger: true })
+    const ok = await confirm({ title: t('query.confirm_clear_title'), message: t('query.confirm_clear_msg'), confirmLabel: t('query.confirm_clear_btn'), danger: true })
     if (!ok) return
     await clearQueryLogs(); await refetch(); setSelectedLogId(null)
   }
@@ -330,7 +349,7 @@ export function QueryTab() {
           {!showConversation && !error && !showHistoryDetail && (
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60%', color: 'var(--text3)', gap: 10 }}>
               <Send size={28} strokeWidth={1.5} />
-              <span style={{ fontSize: 13 }}>输入问题开始探索你的认知图谱</span>
+              <span style={{ fontSize: 13 }}>{t('query.empty_hint')}</span>
             </div>
           )}
 
@@ -364,7 +383,7 @@ export function QueryTab() {
                       <div key={i}>
                         {p.stage && !INLINE_STAGES.has(p.stage) && (
                           <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
-                            {STAGE_LABELS[p.stage] ?? p.stage}
+                            {STAGE_LABEL_KEYS[p.stage] ? t(STAGE_LABEL_KEYS[p.stage] as Parameters<typeof t>[0]) : p.stage}
                           </div>
                         )}
                         {p.toolCalls && p.toolCalls.length > 0 && (
@@ -376,6 +395,13 @@ export function QueryTab() {
                           <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
                             {p.themeResults.map((tr, j) => <ThemeResultCard key={j} result={tr} />)}
                           </div>
+                        )}
+                        {p.rawEntries && p.rawEntries.length > 0 && (
+                          <RawRecallBlock
+                            entries={p.rawEntries}
+                            totalChars={p.rawTotalChars}
+                            candidatesRemaining={p.rawCandidatesRemaining}
+                          />
                         )}
                         {p.text && INLINE_STAGES.has(p.stage) && (
                           <div style={{
@@ -395,7 +421,7 @@ export function QueryTab() {
                     {/* 最后一轮流式指示器 */}
                     {ti === turns.length - 1 && streaming && (
                       <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text3)', fontSize: 12 }}>
-                        <span className="animate-pulse" style={{ color: 'var(--accent)' }}>●</span> 生成中…
+                        <span className="animate-pulse" style={{ color: 'var(--accent)' }}>●</span> {t('query.generating')}
                       </div>
                     )}
                   </div>
@@ -415,20 +441,20 @@ export function QueryTab() {
           {/* 追问/排队提示 */}
           {queueLength > 0 && (
             <div style={{ marginBottom: 10 }}>
-              <span style={{ fontSize: 11, color: 'var(--accent2)' }}>已排队 {queueLength} 个问题</span>
+              <span style={{ fontSize: 11, color: 'var(--accent2)' }}>{t('query.queue_n', { n: queueLength })}</span>
             </div>
           )}
           {totalTurns > 0 && !streaming && queueLength === 0 && (
             <div style={{ marginBottom: 10 }}>
               <span style={{ fontSize: 11, color: 'var(--text3)' }}>
-                第 {totalTurns + 1} 轮 · 可继续追问，上下文已自动携带
+                {t('query.turn_n_followup', { n: totalTurns + 1 })}
               </span>
             </div>
           )}
           {selectedLogId && !streaming && turns.length === 0 && queueLength === 0 && (
             <div style={{ marginBottom: 10 }}>
               <span style={{ fontSize: 11, color: 'var(--accent2)' }}>
-                继续此对话 · 发送后延续历史上下文
+                {t('query.continue_session')}
               </span>
             </div>
           )}
@@ -440,7 +466,7 @@ export function QueryTab() {
                 onKeyDown={e => {
                   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleQuery() }
                 }}
-                placeholder={totalTurns > 0 ? '继续追问…' : '输入问题，对你的认知图谱发起查询…'}
+                placeholder={totalTurns > 0 ? t('query.placeholder_followup') : t('query.placeholder_initial')}
                 className="input"
                 style={{
                   paddingRight: 48, paddingTop: 11, paddingBottom: 11,
@@ -470,7 +496,7 @@ export function QueryTab() {
                     color: mode === m ? '#fff' : 'var(--text3)',
                     transition: 'all 0.12s',
                   }}>
-                  {m === 'full' ? '完整' : '快速'}
+                  {m === 'full' ? t('query.mode_full') : t('query.mode_fast')}
                 </button>
               ))}
             </div>
@@ -493,12 +519,12 @@ export function QueryTab() {
               fontSize: 12, fontWeight: 600, color: '#fff',
             }}
           >
-            <MessageSquarePlus size={13} /> 新建对话
+            <MessageSquarePlus size={13} /> {t('query.new_chat')}
           </button>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '10px 16px', borderBottom: '1px solid var(--border)' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <Clock size={13} style={{ color: 'var(--text3)' }} />
-              <span className="t-caption">历史对话</span>
+              <span className="t-caption">{t('query.history_label')}</span>
             </div>
             {logs.length > 0 && (
               <button onClick={handleClearLogs} style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', padding: 4, borderRadius: 6, color: 'var(--text3)' }}>
@@ -513,13 +539,13 @@ export function QueryTab() {
             onClick={() => setSelectedLogId(null)}
             style={{ cursor: 'pointer', padding: '8px 16px', background: 'rgba(99,102,241,0.1)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--accent2)', flexShrink: 0 }}
           >
-            <span className="animate-pulse">●</span> 正在生成 · 点击返回
+            <span className="animate-pulse">●</span> {t('query.streaming_back')}
           </div>
         )}
 
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {logs.length === 0 && (
-            <div style={{ padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>暂无历史记录</div>
+            <div style={{ padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>{t('query.no_history')}</div>
           )}
           {logs.map(log => {
             const active = selectedLogId === log.id || (selectedLogId === null && log.id === currentLogId && (turns.length > 0 || streaming))
@@ -546,7 +572,7 @@ export function QueryTab() {
                   <div className="line-clamp-2" style={{ fontSize: 12, color: active ? 'var(--text)' : 'var(--text)', fontWeight: active ? 500 : 400, lineHeight: 1.5, marginBottom: 6 }}>{log.question}</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: log.seeds.length ? 6 : 0 }}>
                     <span className="badge" style={{ background: 'rgba(99,102,241,0.12)', color: 'var(--accent2)' }}>{log.mode}</span>
-                    {log.turn_count > 1 && <span className="badge" style={{ background: 'rgba(16,185,129,0.12)', color: '#10b981' }}>{log.turn_count} 轮</span>}
+                    {log.turn_count > 1 && <span className="badge" style={{ background: 'rgba(16,185,129,0.12)', color: '#10b981' }}>{t('query.turns_n', { n: log.turn_count })}</span>}
                     {log.id === currentLogId && streaming && (
                       <span className="animate-pulse" style={{ color: 'var(--accent)', fontSize: 10, lineHeight: 1 }}>●</span>
                     )}
@@ -555,7 +581,7 @@ export function QueryTab() {
                   {log.seeds.length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                       {log.seeds.slice(0, 4).map((s, i) => {
-                        const color = DOMAIN_COLORS[s.domain] || '#6366f1'
+                        const color = getDomainColor(s.domain, backbones)
                         return <span key={i} className="chip" style={{ background: color + '22', color, fontSize: 10 }}>{s.label}</span>
                       })}
                     </div>
@@ -565,7 +591,7 @@ export function QueryTab() {
                   className="log-delete-btn"
                   onClick={async e => {
                     e.stopPropagation()
-                    const ok = await confirm({ title: '删除记录', message: '此条查询记录将被永久删除。', confirmLabel: '删除', danger: true })
+                    const ok = await confirm({ title: t('query.confirm_del_title'), message: t('query.confirm_del_msg'), confirmLabel: t('common.delete'), danger: true })
                     if (!ok) return
                     await deleteQueryLog(log.id)
                     if (selectedLogId === log.id) setSelectedLogId(null)
@@ -630,8 +656,10 @@ function MarkdownText({ text, style }: { text: string; style?: React.CSSProperti
 }
 
 function ToolCallRow({ tc }: { tc: ToolCall }) {
+  const { backbones } = useBackbones()
+  const { lang, t } = useI18n()
   const [open, setOpen] = useState(false)
-  const label = TOOL_LABELS[tc.tool] ?? tc.tool
+  const label = TOOL_LABEL_KEYS[tc.tool] ? t(TOOL_LABEL_KEYS[tc.tool] as Parameters<typeof t>[0]) : tc.tool
   const hasDetail = tc.detail && (tc.detail.nodes.length > 0 || tc.detail.edges.length > 0)
 
   return (
@@ -657,7 +685,7 @@ function ToolCallRow({ tc }: { tc: ToolCall }) {
           </span>
         )}
         {tc.node_count != null && tc.node_count > 0 && (
-          <span className="badge" style={{ background: 'rgba(99,102,241,0.12)', color: 'var(--accent2)', flexShrink: 0 }}>{tc.node_count} 节点</span>
+          <span className="badge" style={{ background: 'rgba(99,102,241,0.12)', color: 'var(--accent2)', flexShrink: 0 }}>{t('query.badge_n_nodes', { n: tc.node_count })}</span>
         )}
         {hasDetail && (
           <span style={{ color: 'var(--text3)', flexShrink: 0 }}>{open ? '▲' : '▼'}</span>
@@ -668,17 +696,17 @@ function ToolCallRow({ tc }: { tc: ToolCall }) {
         <div style={{ borderTop: '1px solid var(--border2)', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
           {tc.detail.nodes.length > 0 && (
             <div>
-              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>节点</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{t('query.nodes')}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
                 {tc.detail.nodes.map((n, i) => {
-                  const color = DOMAIN_COLORS[n.domain] || '#6366f1'
+                  const color = getDomainColor(n.domain, backbones)
                   return (
                     <div key={i} style={{ padding: '6px 8px', borderRadius: 6, background: 'var(--surface)', border: '1px solid var(--border)' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                         <span style={{ fontWeight: 600, color: 'var(--text)', fontSize: 11 }}>{n.label}</span>
-                        <span className="badge" style={{ background: color + '22', color, fontSize: 10 }}>{n.domain}</span>
+                        <span className="badge" style={{ background: color + '22', color, fontSize: 10 }}>{getDomainLabel(n.domain, backbones, lang)}</span>
                         <span style={{ color: n.origin === 'internal' ? 'var(--accent2)' : 'var(--text3)', fontSize: 10 }}>
-                          {n.origin === 'internal' ? '内源' : '外源'}
+                          {n.origin === 'internal' ? t('query.origin_internal') : t('query.origin_external')}
                         </span>
                         <span style={{ marginLeft: 'auto', color: 'var(--text3)', fontSize: 10 }}>
                           str {n.strength?.toFixed ? n.strength.toFixed(2) : n.strength}
@@ -696,7 +724,7 @@ function ToolCallRow({ tc }: { tc: ToolCall }) {
           )}
           {tc.detail.edges.length > 0 && (
             <div>
-              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>边</div>
+              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{t('query.edges')}</div>
               <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                 {tc.detail.edges.map((e, i) => (
                   <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text2)', fontSize: 11 }}>
@@ -715,10 +743,57 @@ function ToolCallRow({ tc }: { tc: ToolCall }) {
   )
 }
 
+function RawRecallBlock({
+  entries, totalChars, candidatesRemaining,
+}: { entries: RawEntry[]; totalChars?: number; candidatesRemaining?: number }) {
+  const { t } = useI18n()
+  const [expanded, setExpanded] = useState(false)
+  return (
+    <div style={{ borderRadius: 10, border: '1px solid var(--border)', overflow: 'hidden', fontSize: 12 }}>
+      <button
+        onClick={() => setExpanded(v => !v)}
+        style={{
+          width: '100%', padding: '10px 14px', background: 'var(--surface2)',
+          border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
+          color: 'var(--text)', fontSize: 12, textAlign: 'left',
+        }}
+      >
+        <span style={{ color: 'var(--accent2)' }}>{expanded ? '▲' : '▼'}</span>
+        <span style={{ fontWeight: 600 }}>{t('query.raw_records_n', { n: entries.length })}</span>
+        <span style={{ color: 'var(--text3)', fontSize: 11 }}>
+          {totalChars ? ` ${t('query.raw_total_chars', { n: totalChars })}` : ''}
+          {typeof candidatesRemaining === 'number' && candidatesRemaining > 0 ? t('query.raw_candidates_n', { n: candidatesRemaining }) : ''}
+        </span>
+      </button>
+      {expanded && (
+        <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 12, borderTop: '1px solid var(--border)' }}>
+          {entries.map((e, i) => (
+            <div key={i} style={{ borderLeft: '2px solid var(--accent2)', paddingLeft: 10 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
+                <span style={{ fontSize: 10, color: 'var(--text3)' }}>#{e.id} · {e.date}</span>
+                {e.linked_nodes?.slice(0, 5).map((l, k) => (
+                  <span key={k} className="badge" style={{ fontSize: 10, padding: '1px 6px' }}>
+                    {l.label}（{l.strength.toFixed(2)}）
+                  </span>
+                ))}
+              </div>
+              <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
+                {e.raw}
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 function ThemeResultCard({ result }: { result: ThemeResult }) {
+  const { backbones } = useBackbones()
+  const { t } = useI18n()
   const [showEntries, setShowEntries] = useState(false)
   const n = result.node
-  const color = DOMAIN_COLORS[n.domain] || '#6366f1'
+  const color = getDomainColor(n.domain, backbones)
 
   return (
     <div style={{ borderRadius: 10, border: '1px solid var(--border)', overflow: 'hidden', fontSize: 12 }}>
@@ -727,7 +802,7 @@ function ThemeResultCard({ result }: { result: ThemeResult }) {
           <span className="badge" style={{ background: color + '22', color }}>{n.domain} · {n.node_type}</span>
           <span style={{ fontWeight: 700, color: 'var(--text)', fontSize: 13 }}>{n.label}</span>
           <span style={{ color: n.origin === 'internal' ? 'var(--accent2)' : 'var(--text3)', fontSize: 10 }}>
-            {n.origin === 'internal' ? '内源' : '外源'}
+            {n.origin === 'internal' ? t('query.origin_internal') : t('query.origin_external')}
           </span>
           <span style={{ marginLeft: 'auto', color: 'var(--text3)', fontSize: 10, flexShrink: 0 }}>
             strength {n.strength.toFixed(3)}
@@ -750,7 +825,7 @@ function ThemeResultCard({ result }: { result: ThemeResult }) {
             }}
           >
             <span style={{ color: 'var(--accent2)' }}>{showEntries ? '▲' : '▼'}</span>
-            {result.entries.length} 条原始记录（点击展开）
+            {t('query.raw_records_click', { n: result.entries.length })}
           </button>
           {showEntries && (
             <div style={{
@@ -778,6 +853,7 @@ function ThemeResultCard({ result }: { result: ThemeResult }) {
 }
 
 function HistoryContextBlock({ text }: { text: string }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(false)
   return (
     <div style={{ marginBottom: 12, borderRadius: 8, border: '1px solid var(--border2)', overflow: 'hidden', fontSize: 12 }}>
@@ -786,7 +862,7 @@ function HistoryContextBlock({ text }: { text: string }) {
         style={{ width: '100%', padding: '6px 12px', background: 'none', border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text3)', fontSize: 11, textAlign: 'left' }}
       >
         <span style={{ color: 'var(--accent2)' }}>{open ? '▲' : '▼'}</span>
-        注入的历史上下文
+        {t('query.inject_history')}
       </button>
       {open && (
         <div style={{ padding: '8px 12px', borderTop: '1px solid var(--border2)', background: 'var(--surface)', color: 'var(--text2)', whiteSpace: 'pre-wrap', lineHeight: 1.65, fontSize: 11 }}>
@@ -797,7 +873,139 @@ function HistoryContextBlock({ text }: { text: string }) {
   )
 }
 
+function buildLogMarkdown(log: QueryLogDetail): string {
+  const turns: QueryTurn[] = log.turns_json?.length
+    ? log.turns_json
+    : [{
+        question: log.question,
+        intent: 'proceed',
+        response: log.q3_text || '',
+        q1_text: log.q1_text || undefined,
+        q2_text: log.q2_text || undefined,
+        created_at: log.created_at,
+      }]
+
+  const out: string[] = []
+  out.push(`# Engram Query Log #${log.id}`)
+  out.push('')
+  out.push(`- **Session**: ${log.session_id || '—'}`)
+  out.push(`- **Created**: ${log.created_at}`)
+  out.push(`- **Updated**: ${log.updated_at}`)
+  out.push(`- **Mode**: ${log.mode || '—'}`)
+  out.push(`- **Turns**: ${turns.length}`)
+  if (log.seeds?.length) {
+    out.push(`- **Seed nodes**: ${log.seeds.map(s => `${s.label}（${s.domain}）`).join('、')}`)
+  }
+  out.push('')
+  out.push('---')
+  out.push('')
+
+  turns.forEach((t, i) => {
+    out.push(`## Turn ${i + 1} · ${t.created_at}`)
+    out.push('')
+    out.push(`**Q**: ${t.question}`)
+    out.push('')
+    if (t.mode) out.push(`**Mode**: ${t.mode}`)
+    out.push(`**Intent**: ${t.intent}`)
+    out.push('')
+
+    if (t.history_context) {
+      out.push('### History context')
+      out.push('```')
+      out.push(t.history_context)
+      out.push('```')
+      out.push('')
+    }
+
+    if (t.q1_text) {
+      out.push('### Q1 Baseline')
+      out.push(t.q1_text)
+      out.push('')
+    }
+
+    if (t.q2_text) {
+      out.push('### Q2 Persona')
+      out.push(t.q2_text)
+      out.push('')
+    }
+
+    if (t.tool_calls?.length) {
+      out.push('### Agent tool calls')
+      t.tool_calls.forEach(c => {
+        const argText = Object.entries(c.args || {})
+          .map(([k, v]) => `${k}=${typeof v === 'string' ? `"${v}"` : JSON.stringify(v)}`)
+          .join(', ')
+        out.push(`- **R${c.round} · ${c.tool}** (${argText})`)
+        if (c.summary) out.push(`  - summary: ${c.summary}`)
+        if (c.preview) {
+          out.push('  - preview:')
+          out.push('    ```')
+          c.preview.split('\n').forEach(line => out.push(`    ${line}`))
+          out.push('    ```')
+        }
+      })
+      out.push('')
+    }
+
+    if (t.theme_recall?.length) {
+      out.push('### Raw recall (evidence used by synthesis)')
+      t.theme_recall.forEach(r => {
+        out.push(`#### 「${r.node_label}」（${r.node_domain}, strength=${r.strength.toFixed(3)}）`)
+        r.entries.forEach(e => {
+          out.push(`- [${e.date}] **#${e.id}**: ${e.raw}`)
+        })
+        out.push('')
+      })
+    }
+
+    if (t.response) {
+      out.push('### Q3 Graph insight (synthesis)')
+      out.push(t.response)
+      out.push('')
+    }
+
+    if (i < turns.length - 1) {
+      out.push('---')
+      out.push('')
+    }
+  })
+
+  if (log.q4_text) {
+    out.push('---')
+    out.push('')
+    out.push('## Q4 Theme deep-dive (combined)')
+    out.push(log.q4_text)
+    out.push('')
+  }
+
+  return out.join('\n')
+}
+
+function downloadLog(log: QueryLogDetail) {
+  const md = buildLogMarkdown(log)
+  const blob = new Blob([md], { type: 'text/markdown;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement('a')
+  a.href = url
+  const stamp = (log.updated_at || log.created_at || '').replace(/[:.]/g, '-').slice(0, 19)
+  a.download = `engram-query-${log.id}-${stamp}.md`
+  document.body.appendChild(a)
+  a.click()
+  document.body.removeChild(a)
+  URL.revokeObjectURL(url)
+}
+
+async function copyLog(log: QueryLogDetail) {
+  try {
+    await navigator.clipboard.writeText(buildLogMarkdown(log))
+  } catch {
+    // ignore
+  }
+}
+
 function LogDetailView({ log }: { log: QueryLogDetail }) {
+  const { t } = useI18n()
+  const [copied, setCopied] = useState(false)
   const turns: QueryTurn[] = log.turns_json?.length
     ? log.turns_json
     : [{
@@ -811,6 +1019,24 @@ function LogDetailView({ log }: { log: QueryLogDetail }) {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 28 }}>
+      <div style={{ display: 'flex', gap: 6, justifyContent: 'flex-end', marginBottom: -16 }}>
+        <button
+          onClick={async () => { await copyLog(log); setCopied(true); setTimeout(() => setCopied(false), 1500) }}
+          style={{
+            padding: '4px 12px', borderRadius: 6, border: '1px solid var(--border2)',
+            background: 'transparent', color: 'var(--text3)', fontSize: 11, cursor: 'pointer',
+          }}>
+          {copied ? t('query.copied') : t('query.copy_md')}
+        </button>
+        <button
+          onClick={() => downloadLog(log)}
+          style={{
+            padding: '4px 12px', borderRadius: 6, border: '1px solid var(--border2)',
+            background: 'transparent', color: 'var(--text3)', fontSize: 11, cursor: 'pointer',
+          }}>
+          {t('query.download_md')}
+        </button>
+      </div>
       {turns.map((turn, i) => (
         <div key={i}>
           {/* 问题气泡 */}
@@ -829,20 +1055,28 @@ function LogDetailView({ log }: { log: QueryLogDetail }) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
               {turn.q1_text && (
                 <div>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>通用解答</div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>{t('query.section_baseline')}</div>
                   <MarkdownText text={turn.q1_text} />
                 </div>
               )}
               {turn.q2_text && (
                 <div>
-                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>人格穿刺</div>
+                  <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>{t('query.section_persona')}</div>
                   <MarkdownText text={turn.q2_text} />
                 </div>
+              )}
+              {turn.tool_calls && turn.tool_calls.length > 0 && (
+                <ToolTraceBlock calls={turn.tool_calls} />
+              )}
+              {turn.theme_recall && turn.theme_recall.length > 0 && (
+                <ThemeRecallBlock items={turn.theme_recall} />
               )}
               {turn.response && (
                 <div>
                   {(turn.q1_text || turn.q2_text) && (
-                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>图谱洞察</div>
+                    <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 8 }}>
+                      {t('query.section_synthesis')}{turn.mode && <span style={{ fontWeight: 400, color: 'var(--text3)', marginLeft: 6 }}>· {turn.mode}</span>}
+                    </div>
                   )}
                   <MarkdownText text={turn.response} />
                 </div>
@@ -858,6 +1092,120 @@ function LogDetailView({ log }: { log: QueryLogDetail }) {
           )}
         </div>
       ))}
+    </div>
+  )
+}
+
+const TRACE_TOOL_META: Record<string, { labelKey: string; color: string }> = {
+  graph_search:  { labelKey: 'query.tool_label_search',   color: '#6366f1' },
+  expand_node:   { labelKey: 'query.tool_label_expand',   color: '#10b981' },
+  get_opposites: { labelKey: 'query.tool_label_opposite', color: '#f87171' },
+  web_search:    { labelKey: 'query.tool_label_web',      color: '#f59e0b' },
+}
+
+function ToolTraceBlock({ calls }: { calls: ToolCallTrace[] }) {
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  return (
+    <div>
+      <div
+        onClick={() => setOpen(v => !v)}
+        style={{
+          fontSize: 11, fontWeight: 600, color: 'var(--accent2)',
+          textTransform: 'uppercase', letterSpacing: '0.05em',
+          cursor: 'pointer', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6,
+        }}>
+        {t('query.agent_log', { n: calls.length })} {open ? '▾' : '▸'}
+      </div>
+      {open && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, paddingLeft: 4 }}>
+          {calls.map((c, i) => {
+            const meta = TRACE_TOOL_META[c.tool]
+            const label = meta ? t(meta.labelKey as Parameters<typeof t>[0]) : c.tool
+            const color = meta ? meta.color : '#94a3b8'
+            const argText = Object.entries(c.args || {})
+              .map(([k, v]) => `${k}=${typeof v === 'string' ? `"${v}"` : JSON.stringify(v)}`)
+              .join(', ')
+            return (
+              <div key={i} style={{
+                padding: '8px 12px', borderRadius: 8,
+                background: 'var(--surface2)', borderLeft: `3px solid ${color}`,
+                fontSize: 11,
+              }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span style={{ color, fontWeight: 600 }}>R{c.round}</span>
+                  <span style={{ color: 'var(--text)', fontWeight: 600 }}>{label}</span>
+                  <span style={{ color: 'var(--text3)', fontFamily: 'monospace' }}>({argText})</span>
+                </div>
+                {c.summary && (
+                  <div style={{ color: 'var(--text3)', marginBottom: 4 }}>{c.summary}</div>
+                )}
+                {c.preview && (
+                  <details style={{ cursor: 'pointer' }}>
+                    <summary style={{ fontSize: 10, color: 'var(--text3)' }}>{t('query.expand_payload')}</summary>
+                    <pre style={{
+                      fontSize: 10, color: 'var(--text2)', whiteSpace: 'pre-wrap',
+                      marginTop: 6, padding: '6px 8px', background: 'var(--surface)',
+                      borderRadius: 4, maxHeight: 240, overflowY: 'auto',
+                    }}>{c.preview}</pre>
+                  </details>
+                )}
+              </div>
+            )
+          })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function ThemeRecallBlock({ items }: { items: ThemeRecall[] }) {
+  const { backbones } = useBackbones()
+  const { t } = useI18n()
+  const [open, setOpen] = useState(false)
+  const totalEntries = items.reduce((s, t) => s + t.entries.length, 0)
+  return (
+    <div>
+      <div
+        onClick={() => setOpen(v => !v)}
+        style={{
+          fontSize: 11, fontWeight: 600, color: 'var(--accent2)',
+          textTransform: 'uppercase', letterSpacing: '0.05em',
+          cursor: 'pointer', marginBottom: 8, display: 'flex', alignItems: 'center', gap: 6,
+        }}>
+        {t('query.raw_recall_n', { n: items.length, entries: totalEntries })} {open ? '▾' : '▸'}
+      </div>
+      {open && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+          {items.map((t, i) => {
+            const color = getDomainColor(t.node_domain, backbones)
+            return (
+              <div key={i} style={{
+                padding: '10px 12px', borderRadius: 8,
+                background: 'var(--surface2)', borderLeft: `3px solid ${color}`,
+              }}>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>
+                  「{t.node_label}」
+                  <span style={{ color: 'var(--text3)', fontWeight: 400, marginLeft: 6, fontSize: 10 }}>
+                    {t.node_domain} · strength {t.strength.toFixed(3)}
+                  </span>
+                </div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+                  {t.entries.map((e, j) => (
+                    <div key={j} style={{
+                      fontSize: 11, color: 'var(--text2)', lineHeight: 1.5,
+                      padding: '4px 8px', borderLeft: '2px solid var(--border)',
+                    }}>
+                      <span style={{ color: 'var(--text3)', fontSize: 10, marginRight: 6 }}>[{e.date}] #{e.id}</span>
+                      {e.raw}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }

@@ -1,8 +1,10 @@
 BACKBONE = {
-    "key":         "心理学",
-    "description": "心理机制、认知模型、行为模式、情绪结构、心理流派",
+    "key":         "psychology",
+    "name":        "Psychology",
+    "color":       "#a855f7",
+    "description": "Psychological mechanisms, cognitive models, behavioral patterns, emotional structures, schools of psychology.",
     "focus_hints": [
-        "关注用户的情绪模式、认知偏差、防御机制、行为习惯",
-        "优先提取能解释用户当前状态的心理规律",
+        "Pay attention to the user's emotional patterns, cognitive biases, defense mechanisms, behavioral habits.",
+        "Prioritize patterns that explain the user's current state.",
     ],
 }

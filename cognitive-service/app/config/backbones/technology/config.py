@@ -1,8 +1,10 @@
 BACKBONE = {
-    "key":         "科技",
-    "description": "技术趋势、工程方法、产品设计、平台演化、AI与前沿技术",
+    "key":         "technology",
+    "name":        "Technology",
+    "color":       "#3b82f6",
+    "description": "Technology trends, engineering methods, product design, platform evolution, AI and frontier tech.",
     "focus_hints": [
-        "关注用户对技术的判断、产品直觉和工程思维",
-        "优先提取有长期有效性的技术规律和方法",
+        "Capture the user's tech judgment, product intuition, and engineering mindset.",
+        "Prioritize patterns and methods with long-term validity.",
     ],
 }

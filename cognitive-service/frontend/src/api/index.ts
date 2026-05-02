@@ -25,6 +25,29 @@ export const fetchEntry = (id: number) =>
 export const fetchEntryTrace = (id: number) =>
   req<TraceData>(`/ui/api/entry/${id}/trace`)
 
+async function _downloadJson(url: string, fallbackName: string) {
+  const res = await fetch(url)
+  if (!res.ok) throw new Error(`${res.status} ${await res.text().catch(() => res.statusText)}`)
+  const blob = await res.blob()
+  const cd = res.headers.get('Content-Disposition') || ''
+  const m = /filename=([^;]+)/i.exec(cd)
+  const filename = (m?.[1] || fallbackName).replace(/^"|"$/g, '').trim()
+  const a = document.createElement('a')
+  const objUrl = URL.createObjectURL(blob)
+  a.href = objUrl
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  URL.revokeObjectURL(objUrl)
+}
+
+export const exportEntryTrace = (id: number) =>
+  _downloadJson(`/ui/api/entry/${id}/trace/export`, `entry_${id}_trace.json`)
+
+export const exportAllTraces = () =>
+  _downloadJson('/ui/api/traces/export', 'process_traces.json')
+
 export const deleteEntry = (id: number) =>
   req<{ deleted: number }>(`/ui/api/entry/${id}`, { method: 'DELETE' })
 
@@ -43,9 +66,27 @@ export const processEntry = (id: number, force = false) =>
 export const fetchGraph = (domain = '') =>
   req<GraphData>(`/ui/api/graph${domain ? `?domain=${domain}` : ''}`)
 
+export const fetchGraphSeed = (domain = '', limit = 24) =>
+  req<GraphData>(`/ui/api/graph/seed?limit=${limit}${domain ? `&domain=${domain}` : ''}`)
+
+export const fetchGraphExpand = (nodeId: number, loadedIds: number[]) =>
+  req<GraphData>(`/ui/api/graph/expand?node_id=${nodeId}&loaded=${loadedIds.join(',')}`)
+
 // ── Profile ───────────────────────────────────────────────────────────────────
 export const fetchProfile = () => req<ProfileDimension[]>('/ui/api/profile')
 export const fetchDimensions = () => req<DimensionSchema[]>('/ui/api/dimensions')
+
+// ── Backbones ─────────────────────────────────────────────────────────────────
+export type BackboneSchema = {
+  key: string
+  name: string
+  color: string
+  description?: string
+  focus_hints?: string[]
+  enabled?: boolean
+}
+export const fetchBackbones = () =>
+  req<{ backbones: BackboneSchema[]; orphan_domains: string[] }>('/ui/api/backbones')
 
 export type EvolutionPoint = { entry_id: number; date: string; score: number; confidence: number }
 export type ProfileEvolution = { ocean: Record<string, EvolutionPoint[]>; schwartz: Record<string, EvolutionPoint[]> }

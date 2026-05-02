@@ -64,8 +64,21 @@ def _load_entry_analyzers() -> tuple[list[dict], dict[str, dict]]:
     return analyzers, {a["key"]: a for a in analyzers}
 
 
+# Fallback palette used when a backbone config does not pin its own color.
+_DEFAULT_BACKBONE_PALETTE = [
+    "#a855f7", "#f59e0b", "#3b82f6", "#10b981",
+    "#ef4444", "#6366f1", "#06b6d4", "#84cc16",
+    "#ec4899", "#14b8a6",
+]
+
+
+def _auto_color(key: str, idx: int) -> str:
+    return _DEFAULT_BACKBONE_PALETTE[idx % len(_DEFAULT_BACKBONE_PALETTE)]
+
+
 def _load_backbones() -> list[dict]:
     bbs = []
+    idx = 0
     for d in sorted(_BACKBONES_ROOT.iterdir()):
         if not d.is_dir() or d.name.startswith("_") or d.name.startswith("."):
             continue
@@ -74,14 +87,38 @@ def _load_backbones() -> list[dict]:
             continue
         mod = _load_py(cfg_file)
         cfg = dict(mod.BACKBONE)
+        if not cfg.get("enabled", True):
+            continue
         cfg["_dir"] = d
-        # 内源 prompt：每域独立（承载域视角与节点类型说明）
+        cfg["name"] = cfg.get("name") or cfg["key"]
+        cfg["color"] = cfg.get("color") or _auto_color(cfg["key"], idx)
+        # Per-domain internal prompt (carries domain perspective + node-type instructions)
         cfg["_internal_node_prompt"] = _read(d / "node_extract.spt")
-        # focus_hints 拼成字符串供外源 prompt 注入
+        # focus_hints joined into a string for the external-prompt template
         hints = cfg.get("focus_hints") or []
-        cfg["_focus_hints_text"] = "\n".join(f"- {h}" for h in hints) if hints else "（无额外指引）"
+        cfg["_focus_hints_text"] = "\n".join(f"- {h}" for h in hints) if hints else "(no extra guidance)"
         bbs.append(cfg)
+        idx += 1
     return bbs
+
+
+def detect_orphan_domains() -> list[str]:
+    """Domains present in the DB but no longer backed by a backbone config.
+
+    Called at app startup to log a warning so the operator knows historical
+    nodes will keep being consumed but are no longer extended by ingestion.
+    """
+    try:
+        from app.lib.db import get_conn
+    except Exception:
+        return []
+    active = {b["key"] for b in BACKBONES}
+    try:
+        with get_conn() as conn:
+            rows = conn.execute("SELECT DISTINCT domain FROM backbone_nodes").fetchall()
+    except Exception:
+        return []
+    return sorted({r[0] for r in rows if r[0] and r[0] not in active})
 
 
 def load_shared_backbone_prompt(name: str) -> str:

@@ -1,5 +1,13 @@
+// react-refresh/only-export-components: this file intentionally exports the
+// `useConfirm` hook alongside `ConfirmProvider`. They are tightly coupled and
+// always imported as a pair; splitting the hook into its own file just to
+// satisfy fast-refresh would be churn. The cost is HMR re-mounting the
+// provider on edits to this file, which is acceptable for a rarely-touched
+// dialog.
+/* eslint-disable react-refresh/only-export-components */
 import { createContext, useCallback, useContext, useRef, useState } from 'react'
 import { AlertTriangle, Trash2, X } from 'lucide-react'
+import { useI18n } from '@/i18n'
 
 // ── Types ─────────────────────────────────────────────────────────────────────
 
@@ -10,6 +18,8 @@ export interface ConfirmOptions {
   cancelLabel?: string
   /** Red confirm button + warning icon */
   danger?: boolean
+  /** Show trash icon instead of warning icon (for delete-style confirms) */
+  destructive?: boolean
 }
 
 type ConfirmState = ConfirmOptions & {
@@ -54,7 +64,12 @@ export function ConfirmProvider({ children }: { children: React.ReactNode }) {
 // ── Dialog UI ─────────────────────────────────────────────────────────────────
 
 function ConfirmDialog({ opts, onClose }: { opts: ConfirmState; onClose: (ok: boolean) => void }) {
-  const { title, message, danger, confirmLabel = '确认', cancelLabel = '取消' } = opts
+  const { t } = useI18n()
+  const {
+    title, message, danger, destructive,
+    confirmLabel = t('common.confirm'),
+    cancelLabel  = t('common.cancel'),
+  } = opts
 
   // Close on backdrop click
   function handleBackdrop(e: React.MouseEvent) {
@@ -99,7 +114,7 @@ function ConfirmDialog({ opts, onClose }: { opts: ConfirmState; onClose: (ok: bo
               background: 'rgba(248,113,113,0.12)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
-              {title.includes('删除') || title.includes('清除')
+              {destructive
                 ? <Trash2 size={17} color="#f87171" />
                 : <AlertTriangle size={17} color="#f87171" />
               }

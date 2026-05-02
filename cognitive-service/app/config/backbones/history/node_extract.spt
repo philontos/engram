@@ -26,15 +26,15 @@ effort_weight: ${effort_weight}
 - <0.2: at most 1 node, or return empty array
 
 ## History domain node types
-- 人物: historical figures, statesmen, military strategists, thinkers, civilization founders
-- 概念: historical events, dynasties, civilizations, institutional forms, social structures
-- 规律: laws of historical rise and fall, power dynamics logic, civilization evolution mechanisms, recurring historical patterns
-- 方法: historical research methods, historiographical schools, historical analogy frameworks
+- person: historical figures, statesmen, military strategists, thinkers, civilization founders
+- concept: historical events, dynasties, civilizations, institutional forms, social structures
+- pattern: laws of historical rise and fall, power dynamics logic, civilization evolution mechanisms, recurring historical patterns
+- method: historical research methods, historiographical schools, historical analogy frameworks
 
 ## Extraction principles
-1. 规律 nodes should reveal deep mechanisms in history, not surface events — e.g., "tension between centralization and local vitality decay" over "the commandery-county system"
+1. pattern nodes should reveal deep mechanisms in history, not surface events — e.g., "tension between centralization and local vitality decay" over "the commandery-county system"
 2. Prioritize historical references the user invokes or implies in their thinking
-3. user_relevance must cite a verbatim fragment from raw as evidence, format: "原文中提到…→与用户的关联"; leave empty if no direct support from raw — do not infer
+3. user_relevance must cite a verbatim fragment from raw as evidence, format: "raw mentions … → connection to the user"; leave empty if no direct support from raw — do not infer
 4. needs_web_enrichment: figures / specific historical events → true; abstract laws → false
 
 ## profile_match_score criteria
@@ -48,10 +48,10 @@ effort_weight: ${effort_weight}
   "nodes": [
     {
       "label":                "<node name>",
-      "node_type":            "人物|概念|规律|方法",
-      "description":          "<objective description, max 50 Chinese characters>",
+      "node_type":            "person|concept|pattern|method",
+      "description":          "<objective description, max 50 characters>",
       "profile_match_score":  <0-1>,
-      "user_relevance":       "<原文中提到…→与用户的关联, max 50 Chinese characters, leave empty if no raw evidence>",
+      "user_relevance":       "<raw mentions … → connection to the user, max 50 characters, leave empty if no raw evidence>",
       "needs_web_enrichment": <true|false>,
       "confidence":           <0-1>
     }

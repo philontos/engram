@@ -1,8 +1,10 @@
 BACKBONE = {
-    "key":         "历史",
-    "description": "历史事件、人物、朝代兴衰、文明演进、权力结构",
+    "key":         "history",
+    "name":        "History",
+    "color":       "#ef4444",
+    "description": "Historical events, figures, dynastic cycles, civilizational evolution, power structures.",
     "focus_hints": [
-        "关注历史中与用户当前思考有共鸣的事件、人物和规律",
-        "优先提取有跨时代借鉴意义的规律节点",
+        "Pick up historical events, figures, and patterns that resonate with the user's current thinking.",
+        "Prioritize patterns that transfer across eras.",
     ],
 }

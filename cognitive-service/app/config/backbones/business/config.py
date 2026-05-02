@@ -1,8 +1,10 @@
 BACKBONE = {
-    "key":         "商业",
-    "description": "商业模式、投资逻辑、企业家、市场规律、商业决策",
+    "key":         "business",
+    "name":        "Business",
+    "color":       "#f59e0b",
+    "description": "Business models, investment logic, entrepreneurs, market patterns, business decisions.",
     "focus_hints": [
-        "关注用户的商业判断、风险偏好、决策模式",
-        "优先提取有行为指导意义的规律和方法节点",
+        "Pay attention to the user's business judgment, risk preferences, decision patterns.",
+        "Prioritize patterns and methods with actionable guidance.",
     ],
 }

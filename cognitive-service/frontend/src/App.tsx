@@ -8,19 +8,22 @@ import { ProfileTab } from '@/components/profile/ProfileTab'
 import { QueryTab }   from '@/components/query/QueryTab'
 import { Network, BookOpen, UserCircle2, Search, Settings, Download, Upload, Zap, Trash2, AlertTriangle, X } from 'lucide-react'
 import { useConfirm } from '@/components/ui/ConfirmDialog'
+import { useI18n, type TKey } from '@/i18n'
+import { LangSwitcher } from '@/components/ui/LangSwitcher'
 
 type Tab = 'graph' | 'entries' | 'profile' | 'query'
 
-const TABS: { id: Tab; label: string; Icon: React.ElementType }[] = [
-  { id: 'graph',   label: '图谱', Icon: Network     },
-  { id: 'entries', label: '记忆', Icon: BookOpen     },
-  { id: 'profile', label: '画像', Icon: UserCircle2 },
-  { id: 'query',   label: '洞察', Icon: Search      },
+const TABS: { id: Tab; labelKey: TKey; Icon: React.ElementType }[] = [
+  { id: 'graph',   labelKey: 'nav.graph',   Icon: Network     },
+  { id: 'entries', labelKey: 'nav.entries', Icon: BookOpen    },
+  { id: 'profile', labelKey: 'nav.profile', Icon: UserCircle2 },
+  { id: 'query',   labelKey: 'nav.query',   Icon: Search      },
 ]
 
 export default function App() {
   const qc      = useQueryClient()
   const confirm = useConfirm()
+  const { t }   = useI18n()
   const [tab, setTab]           = useState<Tab>('graph')
   const [adminOpen, setAdminOpen] = useState(false)
   const [showImport, setShowImport] = useState(false)
@@ -43,7 +46,7 @@ export default function App() {
   async function handleExport() {
     setAdminOpen(false)
     const res = await exportEntries()
-    if (!res.ok) return alert('导出失败')
+    if (!res.ok) return alert(t('admin.export_failed'))
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
     Object.assign(document.createElement('a'), { href: url, download: 'cognitive_entries.json' }).click()
@@ -54,26 +57,27 @@ export default function App() {
     setAdminOpen(false); setAdminBusy(true); setAdminMsg('')
     try {
       const r = await processPending()
-      setAdminMsg(`处理了 ${r.processed} 条`)
+      setAdminMsg(t('admin.processed', { count: r.processed }))
       await qc.invalidateQueries()
-    } catch (e) { setAdminMsg('失败 ' + String(e)) }
+    } catch (e) { setAdminMsg(`${t('common.failed')} ${String(e)}`) }
     finally { setAdminBusy(false) }
   }
 
   async function handleReset(scope: 'derived' | 'all') {
     setAdminOpen(false)
-    const label = scope === 'all' ? '所有数据（含 entries）' : '派生数据（保留 entries）'
+    const label = scope === 'all' ? t('admin.reset_all_label') : t('admin.reset_derived_label')
     const ok = await confirm({
-      title: `重置${scope === 'all' ? '全部' : '派生'}数据`,
-      message: `将清除${label}，此操作不可恢复。`,
-      confirmLabel: '确认重置', danger: true,
+      title: scope === 'all' ? t('admin.reset_all_title') : t('admin.reset_derived_title'),
+      message: t('admin.reset_message', { label }),
+      confirmLabel: t('admin.reset_confirm'),
+      danger: true, destructive: true,
     })
     if (!ok) return
     setAdminBusy(true); setAdminMsg('')
     try {
-      await resetData(scope); setAdminMsg('重置成功')
+      await resetData(scope); setAdminMsg(t('admin.reset_success'))
       await qc.invalidateQueries()
-    } catch (e) { setAdminMsg('失败 ' + String(e)) }
+    } catch (e) { setAdminMsg(`${t('common.failed')} ${String(e)}`) }
     finally { setAdminBusy(false) }
   }
 
@@ -86,13 +90,17 @@ export default function App() {
       // single entry object
       if ('raw' in obj || 'id' in obj) return [obj]
     }
-    throw new Error('无法识别的格式，需要单条对象、数组或 {entries:[...]}')
+    throw new Error(t('import.parse_error'))
   }
 
   async function doImport(text: string) {
     const entries = parseEntries(text)
-    if (!entries.length) throw new Error('没有可导入的记录')
-    const ok = await confirm({ title: `导入 ${entries.length} 条记忆`, message: '将追加到现有数据，不会覆盖已有内容。', confirmLabel: '确认导入' })
+    if (!entries.length) throw new Error(t('import.nothing_to_import'))
+    const ok = await confirm({
+      title: t('import.confirm_title', { count: entries.length }),
+      message: t('import.confirm_message'),
+      confirmLabel: t('import.confirm_button'),
+    })
     if (!ok) return
     await importEntries(entries)
     await qc.invalidateQueries({ queryKey: ['entries'] })
@@ -114,7 +122,7 @@ export default function App() {
 
         {/* Nav items */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%', padding: '0 8px' }}>
-          {TABS.map(({ id, label, Icon }) => {
+          {TABS.map(({ id, labelKey, Icon }) => {
             const active = tab === id
             return (
               <button key={id} onClick={() => setTab(id)}
@@ -132,7 +140,7 @@ export default function App() {
                   }} />
                 )}
                 <Icon size={17} strokeWidth={active ? 2.2 : 1.7} />
-                <span style={{ fontSize: 10, fontWeight: active ? 600 : 400, letterSpacing: '0.02em' }}>{label}</span>
+                <span style={{ fontSize: 10, fontWeight: active ? 600 : 400, letterSpacing: '0.02em' }}>{t(labelKey)}</span>
               </button>
             )
           })}
@@ -147,15 +155,20 @@ export default function App() {
             marginBottom: 12, padding: '10px 8px',
             borderRadius: 10, background: 'var(--surface2)', width: 'calc(100% - 16px)',
           }}>
-            <StatBit label="记忆" value={stats.entries} />
+            <StatBit label={t('stats.entries')} value={stats.entries} />
             <div style={{ width: '100%', height: 1, background: 'var(--border)' }} />
-            <StatBit label="备忘" value={stats.memos ?? 0} />
+            <StatBit label={t('stats.memos')} value={stats.memos ?? 0} />
             <div style={{ width: '100%', height: 1, background: 'var(--border)' }} />
-            <StatBit label="节点" value={stats.nodes} />
+            <StatBit label={t('stats.nodes')} value={stats.nodes} />
             <div style={{ width: '100%', height: 1, background: 'var(--border)' }} />
-            <StatBit label="关系" value={stats.edges} />
+            <StatBit label={t('stats.edges')} value={stats.edges} />
           </div>
         )}
+
+        {/* Language switcher */}
+        <div style={{ width: '100%', padding: '0 8px', marginBottom: 4 }}>
+          <LangSwitcher />
+        </div>
 
         {/* Admin */}
         <div ref={adminRef} style={{ position: 'relative', width: '100%', padding: '0 8px' }}>
@@ -168,7 +181,7 @@ export default function App() {
               color: adminOpen ? 'var(--accent2)' : 'var(--text3)',
             }}>
             <Settings size={17} strokeWidth={1.7} />
-            <span style={{ fontSize: 10 }}>管理</span>
+            <span style={{ fontSize: 10 }}>{t('nav.admin')}</span>
           </button>
 
           {adminOpen && (
@@ -180,18 +193,18 @@ export default function App() {
               boxShadow: '0 16px 48px rgba(0,0,0,0.5)',
             }}>
               <div style={{ padding: '14px 16px 10px', borderBottom: '1px solid var(--border)' }}>
-                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>管理操作</div>
+                <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)', marginBottom: 2 }}>{t('admin.title')}</div>
                 {adminMsg && (
                   <div style={{ fontSize: 11, marginTop: 4, color: 'var(--text2)' }}>{adminMsg}</div>
                 )}
               </div>
               <div style={{ padding: '6px 6px' }}>
-                <AdminMenuItem icon={<Download size={13} />} label="导出 Entries" onClick={handleExport} disabled={adminBusy} />
-                <AdminMenuItem icon={<Upload size={13} />} label="导入 Entries" onClick={() => { setAdminOpen(false); setShowImport(true) }} disabled={adminBusy} />
-                <AdminMenuItem icon={<Zap size={13} />} label="批量处理 Pending" onClick={handleProcessPending} disabled={adminBusy} />
+                <AdminMenuItem icon={<Download size={13} />} label={t('admin.export_entries')} onClick={handleExport} disabled={adminBusy} />
+                <AdminMenuItem icon={<Upload size={13} />} label={t('admin.import_entries')} onClick={() => { setAdminOpen(false); setShowImport(true) }} disabled={adminBusy} />
+                <AdminMenuItem icon={<Zap size={13} />} label={t('admin.process_pending')} onClick={handleProcessPending} disabled={adminBusy} />
                 <div style={{ margin: '6px 10px', height: 1, background: 'var(--border)' }} />
-                <AdminMenuItem icon={<Trash2 size={13} />} label="重置派生数据" onClick={() => handleReset('derived')} disabled={adminBusy} danger />
-                <AdminMenuItem icon={<AlertTriangle size={13} />} label="重置全部数据" onClick={() => handleReset('all')} disabled={adminBusy} danger />
+                <AdminMenuItem icon={<Trash2 size={13} />} label={t('admin.reset_derived')} onClick={() => handleReset('derived')} disabled={adminBusy} danger />
+                <AdminMenuItem icon={<AlertTriangle size={13} />} label={t('admin.reset_all')} onClick={() => handleReset('all')} disabled={adminBusy} danger />
               </div>
             </div>
           )}
@@ -222,6 +235,7 @@ function StatBit({ label, value }: { label: string; value: number }) {
 }
 
 function ImportModal({ onImport, onClose }: { onImport: (text: string) => Promise<void>; onClose: () => void }) {
+  const { t } = useI18n()
   const [pasteText, setPasteText] = useState('')
   const [error, setError]         = useState('')
   const [busy, setBusy]           = useState(false)
@@ -234,7 +248,7 @@ function ImportModal({ onImport, onClose }: { onImport: (text: string) => Promis
       setPasteText(JSON.stringify(JSON.parse(text), null, 2))
       setError('')
     } catch (e) {
-      setError('JSON 格式错误：' + (e instanceof SyntaxError ? e.message : String(e)))
+      setError(`${t('common.invalid_json')}: ${e instanceof SyntaxError ? e.message : String(e)}`)
     }
   }
 
@@ -264,8 +278,8 @@ function ImportModal({ onImport, onClose }: { onImport: (text: string) => Promis
         {/* Header */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '18px 20px', borderBottom: '1px solid var(--border)' }}>
           <div>
-            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>导入记忆</div>
-            <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 3 }}>支持单条对象、数组 <code style={{ background: 'var(--surface2)', padding: '1px 5px', borderRadius: 4, fontSize: 11 }}>[ ]</code>、或 <code style={{ background: 'var(--surface2)', padding: '1px 5px', borderRadius: 4, fontSize: 11 }}>{"{ entries: [] }"}</code> 格式</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--text)' }}>{t('import.title')}</div>
+            <div style={{ fontSize: 12, color: 'var(--text3)', marginTop: 3 }}>{t('import.formats_hint')}</div>
           </div>
           <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', display: 'flex' }}><X size={16} /></button>
         </div>
@@ -274,13 +288,13 @@ function ImportModal({ onImport, onClose }: { onImport: (text: string) => Promis
         <div style={{ padding: '16px 20px 0' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>粘贴 JSON</span>
+              <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('import.paste_json')}</span>
               {pasteText.trim() && (() => {
-                try { JSON.parse(pasteText); return <span style={{ fontSize: 10, color: '#34d399', fontWeight: 600 }}>✓ 合法</span> }
-                catch { return <span style={{ fontSize: 10, color: '#f87171', fontWeight: 600 }}>✗ 格式错误</span> }
+                try { JSON.parse(pasteText); return <span style={{ fontSize: 10, color: '#34d399', fontWeight: 600 }}>{t('import.valid')}</span> }
+                catch { return <span style={{ fontSize: 10, color: '#f87171', fontWeight: 600 }}>{t('import.invalid')}</span> }
               })()}
             </div>
-            <button onClick={handleFormat} disabled={!pasteText.trim()} style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: '1px solid var(--border2)', background: 'transparent', color: 'var(--text3)', cursor: pasteText.trim() ? 'pointer' : 'default', opacity: pasteText.trim() ? 1 : 0.4 }}>格式化</button>
+            <button onClick={handleFormat} disabled={!pasteText.trim()} style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: '1px solid var(--border2)', background: 'transparent', color: 'var(--text3)', cursor: pasteText.trim() ? 'pointer' : 'default', opacity: pasteText.trim() ? 1 : 0.4 }}>{t('import.format_button')}</button>
           </div>
           <textarea
             value={pasteText}
@@ -299,13 +313,13 @@ function ImportModal({ onImport, onClose }: { onImport: (text: string) => Promis
         {/* Divider */}
         <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '12px 20px' }}>
           <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
-          <span style={{ fontSize: 11, color: 'var(--text3)' }}>或</span>
+          <span style={{ fontSize: 11, color: 'var(--text3)' }}>{t('common.or')}</span>
           <div style={{ flex: 1, height: 1, background: 'var(--border)' }} />
         </div>
 
         {/* File upload */}
         <div style={{ padding: '0 20px 16px', display: 'flex', alignItems: 'center', gap: 10 }}>
-          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.05em', flexShrink: 0 }}>选择文件</div>
+          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.05em', flexShrink: 0 }}>{t('import.file_select')}</div>
           <input ref={fileRef} type="file" accept=".json" onChange={handleFile}
             disabled={busy}
             style={{ fontSize: 12, color: 'var(--text2)', flex: 1 }} />
@@ -313,9 +327,9 @@ function ImportModal({ onImport, onClose }: { onImport: (text: string) => Promis
 
         {/* Actions */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '14px 20px', borderTop: '1px solid var(--border)' }}>
-          <button onClick={onClose} className="btn btn-ghost" style={{ fontSize: 13 }}>取消</button>
+          <button onClick={onClose} className="btn btn-ghost" style={{ fontSize: 13 }}>{t('common.cancel')}</button>
           <button onClick={handleSubmit} disabled={busy || !pasteText.trim()} className="btn btn-primary" style={{ fontSize: 13, opacity: (!pasteText.trim() || busy) ? 0.4 : 1 }}>
-            {busy ? '导入中…' : '导入'}
+            {busy ? t('import.importing') : t('import.import')}
           </button>
         </div>
       </div>

@@ -208,7 +208,7 @@ async def run_backbone_pipeline(
         t["db_diff"]["edges_new"].extend(new_edges)
         t["db_diff"]["edges_updated"].extend(upd_edges)
 
-    # Stage 6c: 算法共现 — confirmed 两两共现产出'关联'边，重复共现累加权重
+    # Stage 6c: 算法共现 — confirmed 两两共现产出'related'边，重复共现累加权重
     assoc_edges, assoc_new, assoc_upd = _write_association_edges(confirmed, emb_cache, entry_id, entry_ts)
     t["association_edges"] = assoc_edges
     t["db_diff"]["edges_new"].extend(assoc_new)
@@ -393,7 +393,7 @@ async def _extract_external_candidates(
         slice_summary=slice_summary,
         raw_entry=raw,
         internal_seeds=seeds_text,
-        focus_hints=backbone.get("_focus_hints_text", "（无额外指引）"),
+        focus_hints=backbone.get("_focus_hints_text", "(no extra guidance)"),
         existing_nodes=_format_existing_nodes(domain_rough_nodes),
         effort_weight=str(round(effort, 2)),
     )
@@ -687,7 +687,7 @@ async def _extract_and_persist_edges(
         if not from_label or not to_label or not relation:
             continue
         # 相似/关联由算法负责建连，LLM 输出的这两类忽略
-        if relation in ("相似", "关联"):
+        if relation in ("similar", "related"):
             continue
 
         from_id = label_to_id.get(from_label)
@@ -711,7 +711,7 @@ async def _extract_and_persist_edges(
         })
 
         pairs = [(from_id, to_id, from_label, to_label)]
-        if direction == "双向":
+        if direction == "bidirectional":
             pairs.append((to_id, from_id, to_label, from_label))
 
         for fid, tid, fl, tl in pairs:
@@ -768,7 +768,7 @@ async def _extract_and_persist_edges(
 def _write_algo_similarity_edges(
     confirmed: list[dict], emb_cache: dict[int, list], entry_id: int, entry_ts: str = "",
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    """同域 sim ≥ intra_domain_sim_threshold 或跨域 sim ≥ CROSS_DOMAIN_SIM_THRESHOLD 建 '相似' 算法边。
+    """同域 sim ≥ intra_domain_sim_threshold 或跨域 sim ≥ CROSS_DOMAIN_SIM_THRESHOLD 建 'similar' 算法边。
 
     - 已存在 LLM 边：跳过（算法不覆盖 LLM）
     - 已存在 algo 边：累加 source_entry_ids，不改 weight（sim 静态）
@@ -806,7 +806,7 @@ def _write_algo_similarity_edges(
             with get_conn() as conn:
                 existing = conn.execute(
                     "SELECT id, edge_source, weight, source_entry_ids FROM backbone_edges "
-                    "WHERE from_node_id=? AND to_node_id=? AND relation_type='相似'",
+                    "WHERE from_node_id=? AND to_node_id=? AND relation_type='similar'",
                     (a_id, b_id),
                 ).fetchone()
 
@@ -826,7 +826,7 @@ def _write_algo_similarity_edges(
                         (from_node_id, to_node_id, relation_type, edge_source,
                          confidence, weight,
                          last_reinforced_at, source_entry_ids, created_at, updated_at)
-                    VALUES (?, ?, '相似', 'algo', ?, ?, ?, ?, ?, ?)
+                    VALUES (?, ?, 'similar', 'algo', ?, ?, ?, ?, ?, ?)
                     ON CONFLICT(from_node_id, to_node_id, relation_type) DO UPDATE SET
                         source_entry_ids   = excluded.source_entry_ids,
                         last_reinforced_at = excluded.last_reinforced_at,
@@ -837,7 +837,7 @@ def _write_algo_similarity_edges(
 
             entry = {
                 "from_label": label_by_id[a_id], "to_label": label_by_id[b_id],
-                "relation_type": "相似", "edge_source": "algo",
+                "relation_type": "similar", "edge_source": "algo",
                 "weight": weight, "sim": round(float(sim), 4),
                 "cross_domain": a_domain != b_domain,
             }
@@ -845,32 +845,32 @@ def _write_algo_similarity_edges(
             if existing:
                 updated_rows.append({
                     "from_label": entry["from_label"], "to_label": entry["to_label"],
-                    "relation_type": "相似",
+                    "relation_type": "similar",
                     "weight_before": round(float(existing["weight"]), 4),
                     "weight_after": weight,
                 })
             else:
                 new_rows.append({
                     "from_label": entry["from_label"], "to_label": entry["to_label"],
-                    "relation_type": "相似", "weight": weight,
+                    "relation_type": "similar", "weight": weight,
                 })
 
     return algo_edges, new_rows, updated_rows
 
 
 # ---------------------------------------------------------------------------
-# Stage 6c: 算法共现 — 所有 confirmed 两两共现产出'关联'边，重复共现累加权重
+# Stage 6c: 算法共现 — 所有 confirmed 两两共现产出'related'边，重复共现累加权重
 # ---------------------------------------------------------------------------
 
 def _write_association_edges(
     confirmed: list[dict], emb_cache: dict[int, list], entry_id: int, entry_ts: str = "",
 ) -> tuple[list[dict], list[dict], list[dict]]:
-    """confirmed 两两检查，产出'关联'边以反映用户思维中的共激活。
+    """confirmed 两两检查，产出'related'边以反映用户思维中的共激活。
 
     规则：
     - 若该对 (A, B) 已存在任何关系的边 (支撑/对立/推导/相似) → 跳过（不污染）
-    - 若不存在且 sim ≥ association_min_sim → 建立 '关联' 边，weight = min(sim, initial_cap)
-    - 若已存在 '关联' 边 → 累加 weight += co_increment（上限 weight_cap_max）
+    - 若不存在且 sim ≥ association_min_sim → 建立 'related' 边，weight = min(sim, initial_cap)
+    - 若已存在 'related' 边 → 累加 weight += co_increment（上限 weight_cap_max）
     - 单次最多 association_pairs_per_entry 条，按 sim 降序
 
     返回 (assoc_edges_for_trace, new_rows, updated_rows)
@@ -914,12 +914,12 @@ def _write_association_edges(
         for b_id in node_ids[i + 1:]:
             key = tuple(sorted([a_id, b_id]))
             relations = existing_map.get(key, {})
-            # 若该对已存在非 '关联' 关系，跳过（LLM/相似边有优先权）
-            other_relations = [r for r in relations if r != "关联"]
+            # 若该对已存在非 'related' 关系，跳过（LLM/相似边有优先权）
+            other_relations = [r for r in relations if r != "related"]
             if other_relations:
                 continue
             sim = _cosine_sim(emb_cache[a_id], emb_cache[b_id])
-            if sim < min_sim and "关联" not in relations:
+            if sim < min_sim and "related" not in relations:
                 continue  # 无历史共现且相似度不够
             pairs.append((sim, a_id, b_id))
 
@@ -932,7 +932,7 @@ def _write_association_edges(
 
     for sim, a_id, b_id in pairs:
         key = tuple(sorted([a_id, b_id]))
-        existing = existing_map.get(key, {}).get("关联")
+        existing = existing_map.get(key, {}).get("related")
 
         if existing:
             # 共现累加
@@ -945,17 +945,17 @@ def _write_association_edges(
                     """UPDATE backbone_edges SET
                         weight = ?, source_entry_ids = ?,
                         last_reinforced_at = ?, updated_at = ?
-                      WHERE from_node_id=? AND to_node_id=? AND relation_type='关联'""",
+                      WHERE from_node_id=? AND to_node_id=? AND relation_type='related'""",
                     (new_w, merged_src, ts, ts, a_id, b_id),
                 )
             updated_rows.append({
                 "from_label": label_by_id.get(a_id, ""), "to_label": label_by_id.get(b_id, ""),
-                "relation_type": "关联",
+                "relation_type": "related",
                 "weight_before": round(old_w, 4), "weight_after": new_w,
             })
             assoc_edges.append({
                 "from_label": label_by_id.get(a_id, ""), "to_label": label_by_id.get(b_id, ""),
-                "relation_type": "关联", "edge_source": "algo",
+                "relation_type": "related", "edge_source": "algo",
                 "weight": new_w, "sim": round(float(sim), 4),
                 "co_activation": True,
             })
@@ -971,16 +971,16 @@ def _write_association_edges(
                         (from_node_id, to_node_id, relation_type, edge_source,
                          confidence, weight, last_reinforced_at, source_entry_ids,
                          created_at, updated_at)
-                      VALUES (?, ?, '关联', 'algo', ?, ?, ?, ?, ?, ?)""",
+                      VALUES (?, ?, 'related', 'algo', ?, ?, ?, ?, ?, ?)""",
                     (a_id, b_id, confidence, weight, ts, merged_src, ts, ts),
                 )
             new_rows.append({
                 "from_label": label_by_id.get(a_id, ""), "to_label": label_by_id.get(b_id, ""),
-                "relation_type": "关联", "weight": weight,
+                "relation_type": "related", "weight": weight,
             })
             assoc_edges.append({
                 "from_label": label_by_id.get(a_id, ""), "to_label": label_by_id.get(b_id, ""),
-                "relation_type": "关联", "edge_source": "algo",
+                "relation_type": "related", "edge_source": "algo",
                 "weight": weight, "sim": round(float(sim), 4),
                 "co_activation": False,
             })
@@ -1021,14 +1021,14 @@ def _propagate_opposition_edges(
             oppose_rows = conn.execute(
                 """SELECT CASE WHEN from_node_id=? THEN to_node_id ELSE from_node_id END AS nb_id,
                           weight FROM backbone_edges
-                   WHERE relation_type='对立' AND weight >= ?
+                   WHERE relation_type='opposes' AND weight >= ?
                      AND (from_node_id=? OR to_node_id=?)""",
                 (a_id, min_w, a_id, a_id),
             ).fetchall()
             support_rows = conn.execute(
                 """SELECT CASE WHEN from_node_id=? THEN to_node_id ELSE from_node_id END AS nb_id,
                           weight FROM backbone_edges
-                   WHERE relation_type='支撑' AND weight >= ?
+                   WHERE relation_type='supports' AND weight >= ?
                      AND (from_node_id=? OR to_node_id=?)""",
                 (a_id, min_w, a_id, a_id),
             ).fetchall()
@@ -1079,7 +1079,7 @@ def _propagate_opposition_edges(
                             (from_node_id, to_node_id, relation_type, edge_source,
                              confidence, weight, last_reinforced_at, source_entry_ids,
                              created_at, updated_at)
-                          VALUES (?, ?, '对立', 'algo', ?, ?, ?, ?, ?, ?)
+                          VALUES (?, ?, 'opposes', 'algo', ?, ?, ?, ?, ?, ?)
                           ON CONFLICT(from_node_id, to_node_id, relation_type) DO NOTHING""",
                         (f_id, t_id, conf, w, ts, merged_src, ts, ts),
                     )
@@ -1095,7 +1095,7 @@ def _propagate_opposition_edges(
                 inferred.append(row)
                 new_rows.append({
                     "from_label": row["from_label"], "to_label": row["to_label"],
-                    "relation_type": "对立", "weight": w,
+                    "relation_type": "opposes", "weight": w,
                 })
 
     return inferred, new_rows

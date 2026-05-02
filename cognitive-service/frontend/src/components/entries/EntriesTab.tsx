@@ -1,10 +1,12 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { fetchEntries, fetchEntry, fetchEntryTrace, fetchMemos, processEntry, deleteEntry, revertEntry } from '@/api'
+import { fetchEntries, fetchEntry, fetchEntryTrace, fetchMemos, processEntry, deleteEntry, revertEntry, exportEntryTrace, exportAllTraces } from '@/api'
 import type { EntryDetail, TraceData, SliceFeature, Memo, SituationContext } from '@/types'
-import { DOMAIN_COLORS, SCHWARTZ_COLORS } from '@/lib/constants'
+import { SCHWARTZ_COLORS, getDomainColor, getDomainLabel } from '@/lib/constants'
 import { useDimensionSchemas, getDimSchema } from '@/lib/useDimensionSchemas'
+import { useBackbones } from '@/lib/useBackbones'
+import { useI18n } from '@/i18n'
 import type { DimensionSchema } from '@/types'
 import { fmtTime } from '@/lib/utils'
 import { RefreshCw, Cpu, Search, Trash2, ChevronRight, RotateCcw } from 'lucide-react'
@@ -14,6 +16,8 @@ type ListTab = 'entries' | 'memos'
 
 export function EntriesTab() {
   const qc = useQueryClient()
+  const { backbones } = useBackbones()
+  const { lang, t } = useI18n()
   const [listTab, setListTab]          = useState<ListTab>('entries')
   const [selectedId, setSelectedId]    = useState<number | null>(null)
   const [selectedMemoId, setSelectedMemoId] = useState<number | null>(null)
@@ -34,8 +38,12 @@ export function EntriesTab() {
   })
   const memos = memosData?.memos ?? []
 
+  // When the user has not picked an entry yet, fall back to the first one in
+  // the list. Derived at render time (not via setState-in-effect) so React 19
+  // doesn't flag a cascading-render anti-pattern.
+  const effectiveSelectedId = selectedId ?? entries[0]?.id ?? null
   const { data: detail } = useQuery({
-    queryKey: ['entry', selectedId], queryFn: () => fetchEntry(selectedId!), enabled: selectedId !== null,
+    queryKey: ['entry', effectiveSelectedId], queryFn: () => fetchEntry(effectiveSelectedId!), enabled: effectiveSelectedId !== null,
   })
   const { data: traceData } = useQuery({
     queryKey: ['trace', traceId], queryFn: () => fetchEntryTrace(traceId!), enabled: traceId !== null,
@@ -50,10 +58,6 @@ export function EntriesTab() {
     window.addEventListener('keydown', h)
     return () => window.removeEventListener('keydown', h)
   })
-
-  useEffect(() => {
-    if (!selectedId && entries.length > 0) setSelectedId(entries[0].id)
-  }, [entries])
 
   async function handleCapture() {
     const text = captureText.trim(); if (!text || capturing) return
@@ -70,7 +74,7 @@ export function EntriesTab() {
         await qc.invalidateQueries({ queryKey: ['entries'] })
         await qc.invalidateQueries({ queryKey: ['stats'] })
       }
-    } catch (err) { alert('写入失败: ' + String(err)) }
+    } catch (err) { alert(t('entries.write_failed', { error: String(err) })) }
     finally { setCapturing(false) }
   }
 
@@ -79,15 +83,15 @@ export function EntriesTab() {
     setProcessingIds(prev => new Set(prev).add(id))
     try {
       const r = await processEntry(id)
-      setProcessResult(prev => ({ ...prev, [id]: `${r.nodes_upserted}节点 ${r.edges_upserted}边` }))
+      setProcessResult(prev => ({ ...prev, [id]: t('entries.nodes_edges', { nodes: r.nodes_upserted, edges: r.edges_upserted }) }))
       await Promise.all([qc.invalidateQueries({ queryKey: ['entries'] }), qc.invalidateQueries({ queryKey: ['stats'] }), qc.invalidateQueries({ queryKey: ['graph'] })])
-    } catch { setProcessResult(prev => ({ ...prev, [id]: '失败' })) }
+    } catch { setProcessResult(prev => ({ ...prev, [id]: t('entries.failed') })) }
     finally { setProcessingIds(prev => { const s = new Set(prev); s.delete(id); return s }) }
   }
 
   async function handleDelete(id: number, e: React.MouseEvent) {
     e.stopPropagation()
-    const ok = await confirm({ title: `删除 Entry #${id}`, message: '将同时删除关联的切片和激活记录，无法恢复。', confirmLabel: '删除', danger: true })
+    const ok = await confirm({ title: t('entries.delete_title', { id }), message: t('entries.delete_message'), confirmLabel: t('common.delete'), danger: true })
     if (!ok) return
     await deleteEntry(id)
     if (selectedId === id) setSelectedId(null)
@@ -97,11 +101,11 @@ export function EntriesTab() {
 
   async function handleRevert(id: number, newerCount: number, e: React.MouseEvent) {
     e.stopPropagation()
-    const cascadeNote = newerCount > 0 ? `\n\n将同时级联撤销之后的 ${newerCount} 条记忆。` : ''
+    const cascadeNote = newerCount > 0 ? t('entries.revert_cascade_note', { n: newerCount }) : ''
     const ok = await confirm({
-      title: `撤销 Entry #${id}`,
-      message: `将回滚该条记忆对图谱和画像的影响，entry 状态变为 reverted。${cascadeNote}`,
-      confirmLabel: '撤销',
+      title: t('entries.revert_title', { id }),
+      message: t('entries.revert_message', { cascade: cascadeNote }),
+      confirmLabel: t('entries.revert'),
       danger: true,
     })
     if (!ok) return
@@ -113,7 +117,7 @@ export function EntriesTab() {
         qc.invalidateQueries({ queryKey: ['stats'] }),
         qc.invalidateQueries({ queryKey: ['graph'] }),
       ])
-    } catch (err) { alert('撤销失败: ' + String(err)) }
+    } catch (err) { alert(t('entries.revert_failed', { error: String(err) })) }
     finally { setRevertingIds(prev => { const s = new Set(prev); s.delete(id); return s }) }
   }
 
@@ -130,26 +134,26 @@ export function EntriesTab() {
           <textarea
             ref={textareaRef} rows={3} value={captureText}
             onChange={e => setCaptureText(e.target.value)}
-            placeholder="写点什么… (Ctrl+Enter 提交)"
+            placeholder={t('entries.write_placeholder')}
             className="input"
             style={{ resize: 'none', marginBottom: 8, lineHeight: 1.6, fontSize: 12 }}
           />
           <button onClick={handleCapture} disabled={capturing || !captureText.trim()} className="btn btn-primary" style={{ width: '100%', fontSize: 12 }}>
-            {capturing ? '存储中…' : '存储'}
+            {capturing ? t('entries.storing') : t('entries.store')}
           </button>
         </div>
 
         {/* Header with tab switcher */}
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 16px', borderBottom: '1px solid var(--border)' }}>
           <div style={{ display: 'flex', gap: 4 }}>
-            {(['entries', 'memos'] as ListTab[]).map(t => (
-              <button key={t} onClick={() => setListTab(t)}
+            {(['entries', 'memos'] as ListTab[]).map(tab => (
+              <button key={tab} onClick={() => setListTab(tab)}
                 style={{
                   padding: '3px 10px', borderRadius: 6, border: 'none', cursor: 'pointer', fontSize: 11, fontWeight: 500,
-                  background: listTab === t ? 'var(--accent)' : 'transparent',
-                  color: listTab === t ? '#fff' : 'var(--text3)',
+                  background: listTab === tab ? 'var(--accent)' : 'transparent',
+                  color: listTab === tab ? '#fff' : 'var(--text3)',
                 }}>
-                {t === 'entries' ? '记忆' : '备忘'}
+                {tab === 'entries' ? t('entries.tab_entries') : t('entries.tab_memos')}
               </button>
             ))}
           </div>
@@ -163,9 +167,9 @@ export function EntriesTab() {
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {listTab === 'entries' && (
             <>
-              {isLoading && <div style={{ padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>加载中…</div>}
+              {isLoading && <div style={{ padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>{t('entries.loading')}</div>}
               {entries.map(e => {
-                const isSelected = selectedId === e.id
+                const isSelected = effectiveSelectedId === e.id
                 const processing = processingIds.has(e.id)
                 const result = processResult[e.id]
                 return (
@@ -182,9 +186,10 @@ export function EntriesTab() {
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                       <StatusBadge status={e.processing_status} />
                       <span style={{ fontSize: 10, color: 'var(--text3)' }}>{fmtTime(e.created_at)}</span>
-                      {e.domains.map(d => (
-                        <span key={d} className="chip" style={{ background: DOMAIN_COLORS[d] + '22', color: DOMAIN_COLORS[d] }}>{d}</span>
-                      ))}
+                      {e.domains.map(d => {
+                        const c = getDomainColor(d, backbones)
+                        return <span key={d} className="chip" style={{ background: c + '22', color: c }}>{getDomainLabel(d, backbones, lang)}</span>
+                      })}
                     </div>
                     <div style={{ display: 'flex', gap: 6, marginTop: 8 }} onClick={ev => ev.stopPropagation()}>
                       {e.processing_status !== 'processed' && e.processing_status !== 'reverted' && (
@@ -192,12 +197,12 @@ export function EntriesTab() {
                           style={{
                             display: 'flex', alignItems: 'center', gap: 4, padding: '3px 9px',
                             borderRadius: 6, border: '1px solid var(--border2)', cursor: 'pointer',
-                            background: result?.includes('节点') ? 'rgba(16,185,129,0.1)' : 'var(--surface2)',
-                            color: result?.includes('节点') ? '#10b981' : result === '失败' ? '#f87171' : 'var(--text2)',
+                            background: result && result !== t('entries.failed') ? 'rgba(16,185,129,0.1)' : 'var(--surface2)',
+                            color: result && result !== t('entries.failed') ? '#10b981' : result === t('entries.failed') ? '#f87171' : 'var(--text2)',
                             fontSize: 11, opacity: processing ? 0.5 : 1,
                           }}>
                           <Cpu size={11} />
-                          {processing ? '处理中…' : result || '处理'}
+                          {processing ? t('entries.processing') : result || t('entries.process')}
                         </button>
                       )}
                       {e.processing_status === 'processed' && (
@@ -209,7 +214,7 @@ export function EntriesTab() {
                       {e.can_revert && (
                         <button onClick={ev => handleRevert(e.id, e.newer_processed_count, ev)}
                           disabled={revertingIds.has(e.id)}
-                          title={e.newer_processed_count > 0 ? `级联撤销（含之后 ${e.newer_processed_count} 条）` : '撤销此条记忆'}
+                          title={e.newer_processed_count > 0 ? t('entries.cascade_revert_title', { n: e.newer_processed_count }) : t('entries.revert_one_title')}
                           style={{
                             display: 'flex', alignItems: 'center', gap: 3, padding: '3px 7px',
                             borderRadius: 6, border: '1px solid rgba(248,113,113,0.4)', cursor: 'pointer',
@@ -217,7 +222,7 @@ export function EntriesTab() {
                             opacity: revertingIds.has(e.id) ? 0.5 : 1,
                           }}>
                           <RotateCcw size={11} />
-                          {revertingIds.has(e.id) ? '撤销中…' : e.newer_processed_count > 0 ? `撤销+${e.newer_processed_count}` : '撤销'}
+                          {revertingIds.has(e.id) ? t('entries.reverting') : e.newer_processed_count > 0 ? t('entries.cascade_revert', { n: e.newer_processed_count }) : t('entries.revert')}
                         </button>
                       )}
                       <button onClick={ev => handleDelete(e.id, ev)}
@@ -232,7 +237,7 @@ export function EntriesTab() {
           )}
           {listTab === 'memos' && (
             <>
-              {memosLoading && <div style={{ padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>加载中…</div>}
+              {memosLoading && <div style={{ padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>{t('entries.loading')}</div>}
               {memos.map(m => {
                 const isSelected = selectedMemo?.id === m.id
                 return (
@@ -248,7 +253,7 @@ export function EntriesTab() {
                     </div>
                     <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
                       <span style={{ fontSize: 10, color: 'var(--text3)' }}>{fmtTime(m.created_at)}</span>
-                      <span className="badge" style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>备忘</span>
+                      <span className="badge" style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b' }}>{t('entries.memo_label')}</span>
                       {m.keywords.slice(0, 3).map(k => (
                         <span key={k} className="chip" style={{ background: 'rgba(100,116,139,0.15)', color: 'var(--text3)' }}>{k}</span>
                       ))}
@@ -257,7 +262,7 @@ export function EntriesTab() {
                 )
               })}
               {!memosLoading && memos.length === 0 && (
-                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>暂无备忘</div>
+                <div style={{ padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>{t('entries.no_memos')}</div>
               )}
             </>
           )}
@@ -266,14 +271,14 @@ export function EntriesTab() {
 
       {/* ── Right detail ── */}
       <div style={{ flex: 1, overflowY: 'auto', minWidth: 0 }}>
-        {listTab === 'entries' && !selectedId && (
+        {listTab === 'entries' && !effectiveSelectedId && (
           <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', gap: 8 }}>
             <ChevronRight size={28} strokeWidth={1.5} />
-            <span style={{ fontSize: 13 }}>选择一条记忆查看详情</span>
+            <span style={{ fontSize: 13 }}>{t('entries.select_one')}</span>
           </div>
         )}
-        {listTab === 'entries' && selectedId && detail && (
-          <EntryDetailPanel detail={detail} onTrace={() => setTraceId(selectedId)} />
+        {listTab === 'entries' && effectiveSelectedId && detail && (
+          <EntryDetailPanel detail={detail} onTrace={() => setTraceId(effectiveSelectedId)} />
         )}
         {listTab === 'memos' && selectedMemo && (
           <MemoDetailPanel memo={selectedMemo} />
@@ -289,10 +294,11 @@ export function EntriesTab() {
 }
 
 function MemoDetailPanel({ memo }: { memo: Memo }) {
+  const { t } = useI18n()
   const meta = memo.metadata
   const META_LABELS: Record<string, string> = {
-    captured_at: '记录时间', date: '日期', weekday: '星期',
-    time_of_day: '时段', channel: '来源', source_type: '类型', timezone: '时区',
+    captured_at: t('entries.captured_at'), date: t('entries.date'), weekday: t('entries.weekday'),
+    time_of_day: t('entries.time_of_day'), channel: t('entries.channel'), source_type: t('entries.source_type'), timezone: t('entries.timezone'),
   }
   const metaRows = Object.entries(meta).filter(([k]) => k !== 'captured_at' || true)
 
@@ -300,7 +306,7 @@ function MemoDetailPanel({ memo }: { memo: Memo }) {
     <div style={{ padding: '24px 28px', maxWidth: 720 }}>
       <div style={{ marginBottom: 20 }}>
         <span className="badge" style={{ background: 'rgba(245,158,11,0.15)', color: '#f59e0b', marginBottom: 8, display: 'inline-flex' }}>
-          备忘 #{memo.id}
+          {t('entries.memo_id', { id: memo.id })}
         </span>
         <div style={{ fontSize: 14, color: 'var(--text)', lineHeight: 1.75, marginBottom: 8 }}>{memo.raw}</div>
         <div style={{ fontSize: 11, color: 'var(--text3)' }}>{fmtTime(memo.created_at)} · {memo.source}</div>
@@ -308,7 +314,7 @@ function MemoDetailPanel({ memo }: { memo: Memo }) {
 
       {memo.keywords.length > 0 && (
         <div style={{ marginBottom: 20 }}>
-          <div className="t-caption" style={{ marginBottom: 8 }}>关键词</div>
+          <div className="t-caption" style={{ marginBottom: 8 }}>{t('entries.keywords')}</div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
             {memo.keywords.map(k => (
               <span key={k} className="chip" style={{ background: 'rgba(100,116,139,0.15)', color: 'var(--text2)' }}>{k}</span>
@@ -319,7 +325,7 @@ function MemoDetailPanel({ memo }: { memo: Memo }) {
 
       {metaRows.length > 0 && (
         <div>
-          <div className="t-caption" style={{ marginBottom: 8 }}>元信息</div>
+          <div className="t-caption" style={{ marginBottom: 8 }}>{t('entries.metadata')}</div>
           <div style={{ borderRadius: 10, border: '1px solid var(--border)', overflow: 'hidden' }}>
             {metaRows.map(([k, v], i) => (
               <div key={k} style={{
@@ -339,11 +345,12 @@ function MemoDetailPanel({ memo }: { memo: Memo }) {
 }
 
 function StatusBadge({ status }: { status: string }) {
+  const { t } = useI18n()
   const cfg: Record<string, { bg: string; color: string; label: string }> = {
-    captured:     { bg: 'rgba(79,90,110,0.35)',  color: '#8892a4', label: '待处理' },
-    processed:    { bg: 'rgba(16,185,129,0.15)', color: '#10b981', label: '已处理' },
-    slice_failed: { bg: 'rgba(248,113,113,0.15)', color: '#f87171', label: '处理失败' },
-    reverted:     { bg: 'rgba(245,158,11,0.15)', color: '#f59e0b', label: '已撤销' },
+    captured:     { bg: 'rgba(79,90,110,0.35)',  color: '#8892a4', label: t('entries.status_captured') },
+    processed:    { bg: 'rgba(16,185,129,0.15)', color: '#10b981', label: t('entries.status_processed') },
+    slice_failed: { bg: 'rgba(248,113,113,0.15)', color: '#f87171', label: t('entries.status_slice_failed') },
+    reverted:     { bg: 'rgba(245,158,11,0.15)', color: '#f59e0b', label: t('entries.status_reverted') },
   }
   const s = cfg[status] || cfg.captured
   return <span className="badge" style={{ background: s.bg, color: s.color }}>{s.label}</span>
@@ -351,6 +358,8 @@ function StatusBadge({ status }: { status: string }) {
 
 function EntryDetailPanel({ detail, onTrace }: { detail: EntryDetail; onTrace: () => void }) {
   const schemas = useDimensionSchemas()
+  const { backbones } = useBackbones()
+  const { t, lang } = useI18n()
   return (
     <div style={{ padding: '24px 28px', maxWidth: 720 }}>
       {/* Header */}
@@ -365,7 +374,7 @@ function EntryDetailPanel({ detail, onTrace }: { detail: EntryDetail; onTrace: (
             <StatusBadge status={detail.entry.processing_status} />
             {detail.entry.processing_status === 'processed' && (
               <button onClick={onTrace} style={{ color: 'var(--accent2)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, display: 'flex', alignItems: 'center', gap: 3 }}>
-                <Search size={11} /> 查看 Trace
+                <Search size={11} /> {t('entries.view_trace')}
               </button>
             )}
           </div>
@@ -378,7 +387,7 @@ function EntryDetailPanel({ detail, onTrace }: { detail: EntryDetail; onTrace: (
       {/* Features */}
       {detail.features.length > 0 && (
         <div style={{ marginBottom: 24 }}>
-          <div className="t-caption" style={{ marginBottom: 12 }}>切片分析</div>
+          <div className="t-caption" style={{ marginBottom: 12 }}>{t('entries.slice_analysis')}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
             {detail.features.map((f, i) => <FeatureBlock key={i} f={f} schemas={schemas} />)}
           </div>
@@ -388,14 +397,14 @@ function EntryDetailPanel({ detail, onTrace }: { detail: EntryDetail; onTrace: (
       {/* Activations */}
       {detail.activations.length > 0 && (
         <div>
-          <div className="t-caption" style={{ marginBottom: 12 }}>激活节点 · {detail.activations.length}</div>
+          <div className="t-caption" style={{ marginBottom: 12 }}>{t('entries.activation_nodes', { n: detail.activations.length })}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {detail.activations.map((a, i) => {
-              const color = DOMAIN_COLORS[a.domain] || '#6366f1'
+              const color = getDomainColor(a.domain, backbones)
               return (
                 <div key={i} style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--surface2)', border: '1px solid var(--border)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: a.user_relevance ? 4 : 0 }}>
-                    <span className="chip" style={{ background: color + '22', color }}>{a.domain}</span>
+                    <span className="chip" style={{ background: color + '22', color }}>{getDomainLabel(a.domain, backbones, lang)}</span>
                     <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)' }}>{a.label}</span>
                     <span style={{ fontSize: 11, color: 'var(--text3)' }}>{a.node_type}</span>
                   </div>
@@ -408,7 +417,7 @@ function EntryDetailPanel({ detail, onTrace }: { detail: EntryDetail; onTrace: (
       )}
 
       {detail.activations.length === 0 && detail.entry.processing_status !== 'processed' && (
-        <div style={{ color: 'var(--text3)', fontSize: 12 }}>尚未处理</div>
+        <div style={{ color: 'var(--text3)', fontSize: 12 }}>{t('entries.not_processed')}</div>
       )}
     </div>
   )
@@ -492,18 +501,27 @@ function FeatureBlock({ f, schemas }: { f: SliceFeature; schemas: DimensionSchem
   )
 }
 
-const FRAME_LABEL: Record<string, string> = { present: '当下', retrospective: '回顾', hypothetical: '假设' }
-const STANCE_LABEL: Record<string, string> = { present_reflection: '当下反思', recounting_past: '复述过去', mixed: '混合' }
 const LEVEL_COLOR: Record<string, string> = { high: '#f87171', medium: '#f59e0b', low: '#34d399' }
 
 function SituationBadges({ sit }: { sit: SituationContext }) {
+  const { t } = useI18n()
+  const FRAME_LABEL: Record<string, string> = {
+    present: t('entries.frame_present'),
+    retrospective: t('entries.frame_retrospective'),
+    hypothetical: t('entries.frame_hypothetical'),
+  }
+  const STANCE_LABEL: Record<string, string> = {
+    present_reflection: t('entries.stance_present'),
+    recounting_past: t('entries.stance_recount'),
+    mixed: t('entries.stance_mixed'),
+  }
   const items: { label: string; value: string; color?: string }[] = []
-  if (sit.temporal_frame) items.push({ label: '时间视角', value: FRAME_LABEL[sit.temporal_frame] || sit.temporal_frame })
-  if (sit.narrator_stance) items.push({ label: '叙述立场', value: STANCE_LABEL[sit.narrator_stance] || sit.narrator_stance })
-  if (sit.life_phase_ref) items.push({ label: '人生阶段', value: sit.life_phase_ref })
-  if (sit.emotional_state) items.push({ label: '情绪', value: sit.emotional_state })
-  if (sit.pressure_level) items.push({ label: '压力', value: sit.pressure_level, color: LEVEL_COLOR[sit.pressure_level] })
-  if (sit.energy_level) items.push({ label: '能量', value: sit.energy_level, color: LEVEL_COLOR[sit.energy_level] })
+  if (sit.temporal_frame) items.push({ label: t('entries.sit_temporal'), value: FRAME_LABEL[sit.temporal_frame] || sit.temporal_frame })
+  if (sit.narrator_stance) items.push({ label: t('entries.sit_stance'), value: STANCE_LABEL[sit.narrator_stance] || sit.narrator_stance })
+  if (sit.life_phase_ref) items.push({ label: t('entries.sit_phase'), value: sit.life_phase_ref })
+  if (sit.emotional_state) items.push({ label: t('entries.sit_emotion'), value: sit.emotional_state })
+  if (sit.pressure_level) items.push({ label: t('entries.sit_pressure'), value: sit.pressure_level, color: LEVEL_COLOR[sit.pressure_level] })
+  if (sit.energy_level) items.push({ label: t('entries.sit_energy'), value: sit.energy_level, color: LEVEL_COLOR[sit.energy_level] })
   if (!items.length) return null
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6, marginBottom: 20 }}>
@@ -523,69 +541,21 @@ function SituationBadges({ sit }: { sit: SituationContext }) {
 
 // ── Trace Modal ───────────────────────────────────────────────────────────────
 
-const EDGE_COLORS: Record<string, string> = { 支撑: '#818cf8', 对立: '#f87171', 蕴含: '#34d399', 属于: '#f59e0b', 影响: '#3b82f6', 相似: '#94a3b8' }
+const EDGE_COLORS: Record<string, string> = { supports: '#818cf8', opposes: '#f87171', derives: '#34d399', similar: '#94a3b8', related: '#64748b' }
 
-const FIELD_DOCS: Record<string, { title: string; body: string }> = {
-  conf: {
-    title: 'Confidence (conf)',
-    body: `LLM 对该次提取结果的置信度，范围 0–1，由模型直接输出。
-
-用途：
-• profile merge 中作为新信号权重
-  alpha = new_conf / (hist_effective + new_conf)
-• 低于 0.15 的信号会被直接丢弃，不进入画像
-• node 写入时影响 strength 增量：
-  increment ∝ effort_weight × confidence
-
-含义：0.9 = 模型非常确定；0.3 = 弱信号；<0.15 = 噪声过滤`,
-  },
-  strength: {
-    title: 'Node Strength',
-    body: `节点的累计激活强度，范围理论上无上界，实际常见 0–3。
-
-更新公式（每次 entry 命中该节点）：
-  new = old × time_decay + effort_weight × confidence
-  time_decay = exp(−λ × days_since_last_hit)，λ = 0.005
-
-含义：
-• 高 strength (>1.5)：用户反复提及的认知锚点
-• 中 strength (0.5–1.5)：有一定历史积累
-• 低 strength (<0.5)：刚建立或很久未被强化
-
-在查询链路中，strength 决定节点被激活和召回的优先级。`,
-  },
-  weight: {
-    title: 'Edge Weight',
-    body: `边的累计强化强度，从 0 开始累加，理论上限由配置决定。
-
-LLM 边更新公式（每次被 entry 关联）：
-  weight += min_delta + (base_delta − min_delta) × confidence
-  min_delta = 0.02，base_delta = 0.15
-
-强度等级（查询时动态标注）：
-• weak    < 0.25：1–2 次观测，关系刚建立
-• moderate 0.25–0.5：多次强化，有意义的模式
-• strong  ≥ 0.5：深度建立，高置信结构性连接
-
-注意：weak 不等于不可信，只代表观测次数少。算法边（相似/关联）有独立上限（0.3 / 0.5）。`,
-  },
-  sim: {
-    title: 'Similarity (sim)',
-    body: `语义向量余弦相似度，范围 0–1，由 embedding 模型计算。
-
-用途：
-• 粗召回阶段：从向量库检索与当前 entry 最相关的存量节点
-• 算法边触发：sim ≥ 0.78 时自动建立"相似"边
-• 关联边触发：sim ≥ 0.20 时建立"关联"边（共现兜底）
-
-含义：0.9+ = 几乎相同语义；0.7–0.9 = 强相关；0.5–0.7 = 有关联；<0.5 = 弱相关`,
-  },
+const FIELD_HINT_KEYS: Record<string, { title: string; body: string }> = {
+  conf:     { title: 'fieldHint.conf_title',     body: 'fieldHint.conf_body' },
+  strength: { title: 'fieldHint.strength_title', body: 'fieldHint.strength_body' },
+  weight:   { title: 'fieldHint.weight_title',   body: 'fieldHint.weight_body' },
+  sim:      { title: 'fieldHint.sim_title',      body: 'fieldHint.sim_body' },
 }
 
-function FieldHint({ field }: { field: keyof typeof FIELD_DOCS }) {
+function FieldHint({ field }: { field: keyof typeof FIELD_HINT_KEYS }) {
+  const { t } = useI18n()
   const [pos, setPos] = useState<{ top: number; left: number } | null>(null)
   const btnRef = useRef<HTMLButtonElement>(null)
-  const doc = FIELD_DOCS[field]
+  const keys = FIELD_HINT_KEYS[field]
+  const doc = { title: t(keys.title as Parameters<typeof t>[0]), body: t(keys.body as Parameters<typeof t>[0]) }
 
   useEffect(() => {
     if (!pos) return
@@ -637,6 +607,7 @@ function FieldHint({ field }: { field: keyof typeof FIELD_DOCS }) {
 }
 
 function TraceModal({ traceId, traceData, onClose }: { traceId: number; traceData?: TraceData; onClose: () => void }) {
+  const { t } = useI18n()
   return (
     <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 32, overflowY: 'auto' }}
       onClick={e => e.target === e.currentTarget && onClose()}>
@@ -644,13 +615,27 @@ function TraceModal({ traceId, traceData, onClose }: { traceId: number; traceDat
         <div style={{ position: 'sticky', top: 0, display: 'flex', alignItems: 'center', padding: '16px 20px', background: 'var(--surface)', borderBottom: '1px solid var(--border)', zIndex: 2 }}>
           <div>
             <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Pipeline Trace — Entry #{traceId}</div>
-            {traceData?.updated_at && <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>运行于 {fmtTime(traceData.updated_at)}</div>}
+            {traceData?.updated_at && <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>{t('entries.trace_run_at', { time: fmtTime(traceData.updated_at) })}</div>}
           </div>
-          <button onClick={onClose} style={{ marginLeft: 'auto', background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 18, lineHeight: 1 }}>✕</button>
+          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
+            <button
+              onClick={() => exportEntryTrace(traceId).catch(e => alert(t('entries.export_failed', { error: e.message ?? e })))}
+              title={t('entries.export_one_title')}
+              style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border2)', background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>
+              {t('entries.export_one')}
+            </button>
+            <button
+              onClick={() => exportAllTraces().catch(e => alert(t('entries.export_failed', { error: e.message ?? e })))}
+              title={t('entries.export_all_title')}
+              style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border2)', background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>
+              {t('entries.export_all')}
+            </button>
+            <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 18, lineHeight: 1 }}>✕</button>
+          </div>
         </div>
         <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {!traceData && <div style={{ color: 'var(--text3)', fontSize: 12, padding: 8 }}>加载中…</div>}
-          {traceData && !traceData.trace && <div style={{ color: 'var(--text3)', fontSize: 12, padding: 8 }}>暂无 Trace 数据，请先执行处理</div>}
+          {!traceData && <div style={{ color: 'var(--text3)', fontSize: 12, padding: 8 }}>{t('entries.loading')}</div>}
+          {traceData && !traceData.trace && <div style={{ color: 'var(--text3)', fontSize: 12, padding: 8 }}>{t('entries.no_trace')}</div>}
           {traceData?.trace && <TraceStages trace={traceData.trace} />}
         </div>
       </div>
@@ -659,17 +644,18 @@ function TraceModal({ traceId, traceData, onClose }: { traceId: number; traceDat
 }
 
 function TraceStages({ trace }: { trace: NonNullable<TraceData['trace']> }) {
+  const { t } = useI18n()
   return (
     <>
-      <TraceStage num="1" title="Slice 切片" data={trace.slice}><SliceContent slice={trace.slice} /></TraceStage>
+      <TraceStage num="1" title={t('entries.stage_slice')} data={trace.slice}><SliceContent slice={trace.slice} /></TraceStage>
       <TraceStage num="2" title="Profile Diff" data={trace.profile_diff}><ProfileDiffContent diff={trace.profile_diff} /></TraceStage>
-      <TraceStage num="3" title="Activation 激活" data={trace.activation}><ActivationContent act={trace.activation} /></TraceStage>
-      <TraceStage num="4" title="粗召回 Top-K" data={trace.rough_retrieval} collapsed><RoughRetrievalContent nodes={trace.rough_retrieval} /></TraceStage>
-      <TraceStage num="5" title="Node Extract 各域提取" data={trace.node_extract}><NodeExtractContent extract={trace.node_extract} /></TraceStage>
+      <TraceStage num="3" title={t('entries.stage_activation')} data={trace.activation}><ActivationContent act={trace.activation} /></TraceStage>
+      <TraceStage num="4" title={t('entries.stage_rough_recall')} data={trace.rough_retrieval} collapsed><RoughRetrievalContent nodes={trace.rough_retrieval} /></TraceStage>
+      <TraceStage num="5" title={t('entries.stage_node_extract')} data={trace.node_extract}><NodeExtractContent extract={trace.node_extract} /></TraceStage>
       <TraceStage num="6" title="Confirmed Nodes" data={trace.confirmed_nodes}><ConfirmedNodesContent nodes={trace.confirmed_nodes} /></TraceStage>
-      <TraceStage num="7" title="精召回 子图" data={trace.subgraph} collapsed><SubgraphContent sg={trace.subgraph} /></TraceStage>
-      <TraceStage num="8" title="Edge Extract LLM输出" data={trace.edge_extract}><EdgeExtractContent edges={trace.edge_extract} /></TraceStage>
-      <TraceStage num="9" title="DB Diff 实际变更" data={trace.db_diff}><DbDiffContent diff={trace.db_diff} /></TraceStage>
+      <TraceStage num="7" title={t('entries.stage_subgraph')} data={trace.subgraph} collapsed><SubgraphContent sg={trace.subgraph} /></TraceStage>
+      <TraceStage num="8" title={t('entries.stage_edge_extract')} data={trace.edge_extract}><EdgeExtractContent edges={trace.edge_extract} /></TraceStage>
+      <TraceStage num="9" title={t('entries.stage_db_diff')} data={trace.db_diff}><DbDiffContent diff={trace.db_diff} /></TraceStage>
     </>
   )
 }
@@ -677,10 +663,11 @@ function TraceStages({ trace }: { trace: NonNullable<TraceData['trace']> }) {
 function TraceStage({ num, title, data, collapsed = false, children }: {
   num: string; title: string; data: unknown; collapsed?: boolean; children: React.ReactNode
 }) {
+  const { t } = useI18n()
   const [open, setOpen] = useState(!collapsed)
   const isEmpty = !data || (Array.isArray(data) && !data.length) || (typeof data === 'object' && !Array.isArray(data) && !Object.keys(data as object).length)
   const count = Array.isArray(data) ? data.length : (data && typeof data === 'object' ? Object.keys(data as object).length : 0)
-  const badge = isEmpty ? '空' : count > 0 ? `${count}项` : '有数据'
+  const badge = isEmpty ? t('entries.badge_empty') : count > 0 ? t('entries.badge_n_items', { n: count }) : t('entries.badge_has_data')
   return (
     <div style={{ borderRadius: 10, overflow: 'hidden', border: '1px solid var(--border)' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '10px 14px', background: 'var(--surface2)', cursor: 'pointer', userSelect: 'none' }}
@@ -695,8 +682,9 @@ function TraceStage({ num, title, data, collapsed = false, children }: {
   )
 }
 
-function TEmpty({ text = '空' }: { text?: string }) {
-  return <div style={{ color: 'var(--text3)', fontSize: 11 }}>{text}</div>
+function TEmpty({ text }: { text?: string }) {
+  const { t } = useI18n()
+  return <div style={{ color: 'var(--text3)', fontSize: 11 }}>{text ?? t('entries.empty_text')}</div>
 }
 
 function TTable({ headers, rows }: { headers: React.ReactNode[]; rows: React.ReactNode[][] }) {
@@ -715,13 +703,16 @@ function TTable({ headers, rows }: { headers: React.ReactNode[]; rows: React.Rea
 }
 
 function DPill({ domain }: { domain: string }) {
-  const c = DOMAIN_COLORS[domain] || '#6366f1'
-  return <span className="chip" style={{ background: c + '22', color: c }}>{domain}</span>
+  const { backbones } = useBackbones()
+  const { lang } = useI18n()
+  const c = getDomainColor(domain, backbones)
+  return <span className="chip" style={{ background: c + '22', color: c }}>{getDomainLabel(domain, backbones, lang)}</span>
 }
 
 function SliceContent({ slice }: { slice: NonNullable<TraceData['trace']>['slice'] }) {
   const schemas = useDimensionSchemas()
-  if (!slice || !Object.keys(slice).length) return <TEmpty text="无切片数据" />
+  const { t } = useI18n()
+  if (!slice || !Object.keys(slice).length) return <TEmpty text={t('entries.no_slice')} />
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {Object.entries(slice).map(([dim, data]) => {
@@ -744,13 +735,14 @@ function SliceContent({ slice }: { slice: NonNullable<TraceData['trace']>['slice
 }
 
 function ProfileDiffContent({ diff }: { diff: NonNullable<TraceData['trace']>['profile_diff'] }) {
-  if (!diff || !Object.keys(diff).length) return <TEmpty text="无变化" />
+  const { t } = useI18n()
+  if (!diff || !Object.keys(diff).length) return <TEmpty text={t('entries.no_change')} />
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {Object.entries(diff).map(([dim, keys]) => (
         <div key={dim}>
           <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text3)', marginBottom: 6, textTransform: 'uppercase' }}>{dim}</div>
-          <TTable headers={['字段', '分数', 'Δ', <span>conf<FieldHint field="conf" /></span>]}
+          <TTable headers={[t('entries.th_field'), t('entries.th_score'), 'Δ', <span>conf<FieldHint field="conf" /></span>]}
             rows={Object.entries(keys as Record<string, Record<string, number>>).map(([k, v]) => [
               k,
               'delta' in v ? `${v.score_before} → ${v.score_after}` : `${JSON.stringify((v as unknown as Record<string, unknown>).before)} → ${JSON.stringify((v as unknown as Record<string, unknown>).after)}`,
@@ -765,11 +757,13 @@ function ProfileDiffContent({ diff }: { diff: NonNullable<TraceData['trace']>['p
 }
 
 function ActivationContent({ act }: { act: NonNullable<TraceData['trace']>['activation'] }) {
-  if (!act || !Object.keys(act).length) return <TEmpty text="无激活域" />
+  const { backbones } = useBackbones()
+  const { t } = useI18n()
+  if (!act || !Object.keys(act).length) return <TEmpty text={t('entries.no_activation')} />
   return (
-    <TTable headers={['域', 'effort_weight', '']}
+    <TTable headers={[t('entries.th_domain_act'), 'effort_weight', '']}
       rows={Object.entries(act).sort(([, a], [, b]) => b - a).map(([domain, w]) => {
-        const c = DOMAIN_COLORS[domain] || '#6366f1'
+        const c = getDomainColor(domain, backbones)
         return [
           <DPill domain={domain} />,
           w.toFixed(3),
@@ -783,22 +777,25 @@ function ActivationContent({ act }: { act: NonNullable<TraceData['trace']>['acti
 }
 
 function RoughRetrievalContent({ nodes }: { nodes: NonNullable<TraceData['trace']>['rough_retrieval'] }) {
-  if (!nodes?.length) return <TEmpty text="无存量节点" />
-  return <TTable headers={['标签', '域', '类型', <span>strength<FieldHint field="strength" /></span>, <span>sim<FieldHint field="sim" /></span>]}
+  const { t } = useI18n()
+  if (!nodes?.length) return <TEmpty text={t('entries.empty_text')} />
+  return <TTable headers={[t('entries.th_label'), t('entries.th_domain'), t('entries.th_type'), <span>strength<FieldHint field="strength" /></span>, <span>sim<FieldHint field="sim" /></span>]}
     rows={nodes.map(n => [n.label, <DPill domain={n.domain} />, n.node_type, n.strength.toFixed(3), <span style={{ color: '#10b981' }}>{n.sim.toFixed(3)}</span>])} />
 }
 
 function NodeExtractContent({ extract }: { extract: NonNullable<TraceData['trace']>['node_extract'] }) {
-  if (!extract || !Object.keys(extract).length) return <TEmpty text="无提取结果" />
+  const { backbones } = useBackbones()
+  const { lang, t } = useI18n()
+  if (!extract || !Object.keys(extract).length) return <TEmpty text={t('entries.no_extract')} />
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {Object.entries(extract).map(([domain, nodes]) => {
-        const c = DOMAIN_COLORS[domain] || '#6366f1'
+        const c = getDomainColor(domain, backbones)
         return (
           <div key={domain}>
-            <div style={{ fontSize: 10, fontWeight: 600, color: c, marginBottom: 6 }}>{domain} ({nodes.length}个节点)</div>
+            <div style={{ fontSize: 10, fontWeight: 600, color: c, marginBottom: 6 }}>{t('entries.domain_n_nodes', { domain: getDomainLabel(domain, backbones, lang), n: nodes.length })}</div>
             {nodes.length === 0 ? <TEmpty /> : (
-              <TTable headers={['标签', '类型', <span>conf<FieldHint field="conf" /></span>, '描述']}
+              <TTable headers={[t('entries.th_label'), t('entries.th_type'), <span>conf<FieldHint field="conf" /></span>, t('entries.th_description')]}
                 rows={nodes.map(n => [n.label, n.node_type, n.confidence.toFixed(2), <span style={{ color: 'var(--text3)', display: 'block', maxWidth: 200, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{n.description || ''}</span>])} />
             )}
           </div>
@@ -809,31 +806,34 @@ function NodeExtractContent({ extract }: { extract: NonNullable<TraceData['trace
 }
 
 function ConfirmedNodesContent({ nodes }: { nodes: NonNullable<TraceData['trace']>['confirmed_nodes'] }) {
-  if (!nodes?.length) return <TEmpty text="无确认节点" />
-  return <TTable headers={['标签', '域', '类型', '状态', <span>strength<FieldHint field="strength" /></span>, <span>conf<FieldHint field="conf" /></span>]}
+  const { t } = useI18n()
+  if (!nodes?.length) return <TEmpty text={t('entries.no_confirmed')} />
+  return <TTable headers={[t('entries.th_label'), t('entries.th_domain'), t('entries.th_type'), t('entries.th_status'), <span>strength<FieldHint field="strength" /></span>, <span>conf<FieldHint field="conf" /></span>]}
     rows={nodes.map(n => [
       n.label, <DPill domain={n.domain} />, n.node_type,
-      <span className="badge" style={n.is_new ? { background: 'rgba(16,185,129,0.15)', color: '#10b981' } : { background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>{n.is_new ? '新建' : '命中'}</span>,
+      <span className="badge" style={n.is_new ? { background: 'rgba(16,185,129,0.15)', color: '#10b981' } : { background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>{n.is_new ? t('entries.badge_new') : t('entries.badge_hit')}</span>,
       n.strength.toFixed(3), n.new_conf != null ? n.new_conf.toFixed(3) : '—',
     ])} />
 }
 
 function SubgraphContent({ sg }: { sg: NonNullable<TraceData['trace']>['subgraph'] }) {
-  if (!sg) return <TEmpty text="无子图" />
+  const { t } = useI18n()
+  if (!sg) return <TEmpty text={t('entries.no_subgraph')} />
   const nodes = sg.nodes || [], edges = sg.edges || []
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-      <div style={{ color: 'var(--text3)', fontSize: 11 }}>{nodes.length} 节点 · {edges.length} 边</div>
-      {nodes.length > 0 && <TTable headers={['标签', '域', <span>strength<FieldHint field="strength" /></span>]} rows={nodes.map(n => [n.label, <DPill domain={n.domain} />, n.strength.toFixed(3)])} />}
-      {edges.length > 0 && <TTable headers={['from', '关系', 'to', <span>weight<FieldHint field="weight" /></span>]}
+      <div style={{ color: 'var(--text3)', fontSize: 11 }}>{t('entries.nodes_edges_label', { nodes: nodes.length, edges: edges.length })}</div>
+      {nodes.length > 0 && <TTable headers={[t('entries.th_label'), t('entries.th_domain'), <span>strength<FieldHint field="strength" /></span>]} rows={nodes.map(n => [n.label, <DPill domain={n.domain} />, n.strength.toFixed(3)])} />}
+      {edges.length > 0 && <TTable headers={['from', t('entries.th_relation'), 'to', <span>weight<FieldHint field="weight" /></span>]}
         rows={edges.map(e => [e.from_label, <span style={{ color: EDGE_COLORS[e.relation_type] || '#64748b' }}>{e.relation_type}</span>, e.to_label, (e.weight ?? 0).toFixed(3)])} />}
     </div>
   )
 }
 
 function EdgeExtractContent({ edges }: { edges: NonNullable<TraceData['trace']>['edge_extract'] }) {
-  if (!edges?.length) return <TEmpty text="无边提取结果" />
-  return <TTable headers={['from', '关系', 'to', '方向', <span>conf<FieldHint field="conf" /></span>, '证据']}
+  const { t } = useI18n()
+  if (!edges?.length) return <TEmpty text={t('entries.no_edge_extract')} />
+  return <TTable headers={['from', t('entries.th_relation'), 'to', t('entries.th_direction'), <span>conf<FieldHint field="conf" /></span>, t('entries.th_evidence')]}
     rows={edges.map(e => [
       e.from_label,
       <span style={{ color: EDGE_COLORS[e.relation_type] || '#64748b' }}>{e.relation_type}</span>,
@@ -845,32 +845,33 @@ function EdgeExtractContent({ edges }: { edges: NonNullable<TraceData['trace']>[
 }
 
 function DbDiffContent({ diff }: { diff: NonNullable<TraceData['trace']>['db_diff'] }) {
-  if (!diff) return <TEmpty text="无 diff 数据" />
+  const { t } = useI18n()
+  if (!diff) return <TEmpty text={t('entries.no_diff')} />
   const { nodes_new: nn = [], nodes_updated: nu = [], edges_new: en = [], edges_updated: eu = [] } = diff
-  if (!nn.length && !nu.length && !en.length && !eu.length) return <TEmpty text="无 DB 变更" />
+  if (!nn.length && !nu.length && !en.length && !eu.length) return <TEmpty text={t('entries.no_db_change')} />
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {nn.length > 0 && <>
-        <div style={{ fontSize: 10, fontWeight: 600, color: '#10b981' }}>新建节点 ({nn.length})</div>
-        <TTable headers={['id', '标签', '域', '类型', <span>strength<FieldHint field="strength" /></span>]}
+        <div style={{ fontSize: 10, fontWeight: 600, color: '#10b981' }}>{t('entries.new_nodes_n', { n: nn.length })}</div>
+        <TTable headers={[t('entries.th_id'), t('entries.th_label'), t('entries.th_domain'), t('entries.th_type'), <span>strength<FieldHint field="strength" /></span>]}
           rows={nn.map(n => [`#${n.id}`, n.label, <DPill domain={n.domain} />, n.node_type, n.strength.toFixed(3)])} />
       </>}
       {nu.length > 0 && <>
-        <div style={{ fontSize: 10, fontWeight: 600, color: '#818cf8' }}>更新节点 ({nu.length})</div>
-        <TTable headers={['标签', '域', <span>before<FieldHint field="strength" /></span>, 'after', 'Δ']}
+        <div style={{ fontSize: 10, fontWeight: 600, color: '#818cf8' }}>{t('entries.update_nodes_n', { n: nu.length })}</div>
+        <TTable headers={[t('entries.th_label'), t('entries.th_domain'), <span>before<FieldHint field="strength" /></span>, 'after', 'Δ']}
           rows={nu.map(n => {
             const d = n.strength_after - n.strength_before
             return [n.label, <DPill domain={n.domain} />, n.strength_before.toFixed(3), n.strength_after.toFixed(3), <span style={{ color: d > 0 ? '#10b981' : '#f87171', fontWeight: 700 }}>{d > 0 ? '+' : ''}{d.toFixed(3)}</span>]
           })} />
       </>}
       {en.length > 0 && <>
-        <div style={{ fontSize: 10, fontWeight: 600, color: '#10b981' }}>新建边 ({en.length})</div>
-        <TTable headers={['from', '关系', 'to', <span>weight<FieldHint field="weight" /></span>]}
+        <div style={{ fontSize: 10, fontWeight: 600, color: '#10b981' }}>{t('entries.new_edges_n', { n: en.length })}</div>
+        <TTable headers={['from', t('entries.th_relation'), 'to', <span>weight<FieldHint field="weight" /></span>]}
           rows={en.map(e => [e.from_label, <span style={{ color: EDGE_COLORS[e.relation_type] || '#64748b' }}>{e.relation_type}</span>, e.to_label, (e.weight ?? 0).toFixed(3)])} />
       </>}
       {eu.length > 0 && <>
-        <div style={{ fontSize: 10, fontWeight: 600, color: '#818cf8' }}>更新边 ({eu.length})</div>
-        <TTable headers={['from', '关系', 'to', <span>weight delta<FieldHint field="weight" /></span>]}
+        <div style={{ fontSize: 10, fontWeight: 600, color: '#818cf8' }}>{t('entries.update_edges_n', { n: eu.length })}</div>
+        <TTable headers={['from', t('entries.th_relation'), 'to', <span>weight delta<FieldHint field="weight" /></span>]}
           rows={eu.map(e => {
             const dw = (e.weight_after ?? 0) - (e.weight_before ?? 0)
             return [e.from_label, <span style={{ color: EDGE_COLORS[e.relation_type] || '#64748b' }}>{e.relation_type}</span>, e.to_label,

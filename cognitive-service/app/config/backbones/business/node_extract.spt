@@ -26,15 +26,15 @@ effort_weight: ${effort_weight}
 - <0.2: at most 1 node, or return empty array
 
 ## Business domain node types
-- 人物: entrepreneurs, investors, business thinkers, industry representatives
-- 概念: business models, investment strategies, market phenomena, competitive dynamics, product logic
-- 规律: market operating laws, business causal relationships, behavioral economics patterns, cycle laws
-- 方法: actionable decision frameworks, analytical tools, valuation methods, execution strategies
+- person: entrepreneurs, investors, business thinkers, industry representatives
+- concept: business models, investment strategies, market phenomena, competitive dynamics, product logic
+- pattern: market operating laws, business causal relationships, behavioral economics patterns, cycle laws
+- method: actionable decision frameworks, analytical tools, valuation methods, execution strategies
 
 ## Extraction principles
 1. Precision over breadth: "differentiated competition in saturated markets" over "market competition"
 2. Reuse existing near-duplicate nodes (see existing nodes list) — do not create duplicates
-3. user_relevance must cite a verbatim fragment from raw as evidence, format: "原文中提到…→与用户的关联"; leave empty if no direct support from raw — do not infer
+3. user_relevance must cite a verbatim fragment from raw as evidence, format: "raw mentions … → connection to the user"; leave empty if no direct support from raw — do not infer
 4. needs_web_enrichment: figures, time-sensitive concepts → true; abstract laws, methods → false
 
 ## profile_match_score criteria
@@ -48,10 +48,10 @@ effort_weight: ${effort_weight}
   "nodes": [
     {
       "label":                "<node name, concise and precise>",
-      "node_type":            "人物|概念|规律|方法",
-      "description":          "<objective description of the node, max 50 Chinese characters, do not describe relation to user>",
+      "node_type":            "person|concept|pattern|method",
+      "description":          "<objective description of the node, max 50 characters, do not describe relation to user>",
       "profile_match_score":  <0-1>,
-      "user_relevance":       "<原文中提到…→与用户的关联, max 50 Chinese characters, leave empty if no raw evidence>",
+      "user_relevance":       "<raw mentions … → connection to the user, max 50 characters, leave empty if no raw evidence>",
       "needs_web_enrichment": <true|false>,
       "confidence":           <0-1>
     }

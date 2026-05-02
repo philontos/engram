@@ -26,15 +26,15 @@ effort_weight: ${effort_weight}
 - <0.2: at most 1 node, or return empty array
 
 ## Technology domain node types
-- 人物: tech leaders, product designers, engineering thinkers, founders
-- 概念: tech stacks, platform architectures, product paradigms, technology trend terms
-- 规律: technology evolution laws, product growth laws, engineering complexity laws, platform network effect mechanisms
-- 方法: engineering practices, product design frameworks, technical decision tools, architecture design principles
+- person: tech leaders, product designers, engineering thinkers, founders
+- concept: tech stacks, platform architectures, product paradigms, technology trend terms
+- pattern: technology evolution laws, product growth laws, engineering complexity laws, platform network effect mechanisms
+- method: engineering practices, product design frameworks, technical decision tools, architecture design principles
 
 ## Extraction principles
-1. 规律 nodes should capture deep logic of the tech world — e.g., "two-sided network effects and value capture in platform ecosystems" over "network effects"
+1. pattern nodes should capture deep logic of the tech world — e.g., "two-sided network effects and value capture in platform ecosystems" over "network effects"
 2. Prioritize laws with lasting validity over momentarily trendy tech terms
-3. user_relevance must cite a verbatim fragment from raw as evidence, format: "原文中提到…→与用户的关联"; leave empty if no direct support from raw — do not infer
+3. user_relevance must cite a verbatim fragment from raw as evidence, format: "raw mentions … → connection to the user"; leave empty if no direct support from raw — do not infer
 4. needs_web_enrichment: figures / specific products / emerging tech → true; engineering laws / methods → false
 
 ## profile_match_score criteria
@@ -48,10 +48,10 @@ effort_weight: ${effort_weight}
   "nodes": [
     {
       "label":                "<node name>",
-      "node_type":            "人物|概念|规律|方法",
-      "description":          "<objective description, max 50 Chinese characters>",
+      "node_type":            "person|concept|pattern|method",
+      "description":          "<objective description, max 50 characters>",
       "profile_match_score":  <0-1>,
-      "user_relevance":       "<原文中提到…→与用户的关联, max 50 Chinese characters, leave empty if no raw evidence>",
+      "user_relevance":       "<raw mentions … → connection to the user, max 50 characters, leave empty if no raw evidence>",
       "needs_web_enrichment": <true|false>,
       "confidence":           <0-1>
     }

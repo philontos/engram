@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
@@ -119,6 +120,45 @@ def _summarize_llm_calls(calls: list[dict]) -> dict:
     }
 
 
+def _compute_metrics(trace: dict, raw: str) -> dict:
+    """从 trace 各字段聚合客观度量（可数硬数据，不做主观判断）。"""
+    def _len(v) -> int:
+        if v is None: return 0
+        if isinstance(v, list): return len(v)
+        if isinstance(v, dict): return len(v)
+        return 0
+
+    def _sum_by_domain(d: dict | None) -> int:
+        if not isinstance(d, dict): return 0
+        return sum(len(v) if isinstance(v, list) else 0 for v in d.values())
+
+    def _changed_subdims(profile_diff: dict | None) -> int:
+        if not isinstance(profile_diff, dict): return 0
+        return sum(len(v) if isinstance(v, dict) else 0 for v in profile_diff.values())
+
+    db_diff = trace.get("db_diff") or {}
+    return {
+        "raw_chars": len(raw or ""),
+        "duration_ms": trace.get("duration_ms", 0),
+        "slice_feature_count": _len(trace.get("slice")),
+        "profile_changed_subdims": _changed_subdims(trace.get("profile_diff")),
+        "activation_count": _len(trace.get("activation")),
+        "rough_retrieval_count": _len(trace.get("rough_retrieval")),
+        "node_extract_internal_count": _sum_by_domain(trace.get("node_extract_internal")),
+        "node_extract_external_count": _sum_by_domain(trace.get("node_extract_external")),
+        "confirmed_nodes_count": _len(trace.get("confirmed_nodes")),
+        "db_nodes_new": _len(db_diff.get("nodes_new")),
+        "db_nodes_updated": _len(db_diff.get("nodes_updated")),
+        "db_edges_new": _len(db_diff.get("edges_new")),
+        "db_edges_updated": _len(db_diff.get("edges_updated")),
+        "algo_edges_count": _len(trace.get("algo_edges")),
+        "edge_extract_count": _len(trace.get("edge_extract")),
+        "association_edges_count": _len(trace.get("association_edges")),
+        "opposition_propagation_count": _len(trace.get("opposition_propagation")),
+        "llm": trace.get("llm_summary") or {},
+    }
+
+
 def _get_slice_features(slice_id: int) -> dict:
     with get_conn() as conn:
         rows = conn.execute(
@@ -166,7 +206,12 @@ async def _run_pipeline(entry_id: int, row) -> ProcessResult:
             entry_dt = entry_dt.replace(tzinfo=timezone.utc)
     except Exception:
         pass
-    trace: dict = {"entry_id": entry_id}
+    started_at = datetime.now(timezone.utc)
+    started_perf = time.perf_counter()
+    trace: dict = {
+        "entry_id": entry_id,
+        "started_at": started_at.isoformat(),
+    }
     llm_calls: list[dict] = []
 
     # Rollback: 记录处理前的 profile_snapshot_id
@@ -204,6 +249,11 @@ async def _run_pipeline(entry_id: int, row) -> ProcessResult:
 
     trace["llm_calls"] = llm_calls
     trace["llm_summary"] = _summarize_llm_calls(llm_calls)
+
+    finished_at = datetime.now(timezone.utc)
+    trace["finished_at"] = finished_at.isoformat()
+    trace["duration_ms"] = int((time.perf_counter() - started_perf) * 1000)
+    trace["metrics"] = _compute_metrics(trace, raw)
 
     rollback = {
         "prev_profile_snapshot_id": prev_snapshot_id,

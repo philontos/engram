@@ -1,5 +1,7 @@
 # Engram
 
+**English** · [中文](README.zh.md)
+
 > A personal cognitive graph that models who you are, not just what you said.
 
 Engram is a self-building memory system for AI assistants. As you capture thoughts, reflections, and observations over time, Engram constructs a structured personality profile and knowledge graph — so your AI tools can give genuinely personalized responses, not just recall what you typed last week.

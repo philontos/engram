@@ -26,16 +26,16 @@ effort_weight: ${effort_weight}
 - <0.2: at most 1 node, or return empty array
 
 ## Psychology domain node types
-- 人物: psychologists, psychoanalysts, cognitive scientists, behavioral economics representatives
-- 概念: psychological terms, cognitive bias names, emotion types, mental states, personality trait descriptions
-- 规律: psychological mechanisms, cognitive laws, causal relationships in behavioral patterns, emotional trigger mechanisms
-- 方法: psychological intervention techniques, cognitive restructuring tools, emotion regulation strategies, mindfulness/meditation methods
+- person: psychologists, psychoanalysts, cognitive scientists, behavioral economics representatives
+- concept: psychological terms, cognitive bias names, emotion types, mental states, personality trait descriptions
+- pattern: psychological mechanisms, cognitive laws, causal relationships in behavioral patterns, emotional trigger mechanisms
+- method: psychological intervention techniques, cognitive restructuring tools, emotion regulation strategies, mindfulness/meditation methods
 
 ## Extraction principles
 1. Prioritize nodes directly related to the user's current psychological state
-2. 规律 nodes should describe specific mechanisms rather than vague concepts, e.g., "anxiety amplification mechanism in high-N individuals under uncertainty" over "anxiety"
-3. user_relevance must cite a verbatim fragment from raw as evidence, format: "原文中提到…→与用户的关联"; leave empty if no direct support from raw — do not infer
-4. needs_web_enrichment: figures → true; concepts/laws/methods → false (psychological terms are relatively stable)
+2. pattern nodes should describe specific mechanisms rather than vague concepts, e.g., "anxiety amplification mechanism in high-N individuals under uncertainty" over "anxiety"
+3. user_relevance must cite a verbatim fragment from raw as evidence, format: "raw mentions <…> → connection to the user"; leave empty if no direct support from raw — do not infer
+4. needs_web_enrichment: figures → true; concepts/patterns/methods → false (psychological terms are relatively stable)
 
 ## profile_match_score criteria
 - 0.9-1.0: node directly describes the psychological state or behavior the user exhibited in this input
@@ -48,10 +48,10 @@ effort_weight: ${effort_weight}
   "nodes": [
     {
       "label":                "<node name>",
-      "node_type":            "人物|概念|规律|方法",
-      "description":          "<objective description, max 50 Chinese characters>",
+      "node_type":            "person|concept|pattern|method",
+      "description":          "<objective description, max 50 characters>",
       "profile_match_score":  <0-1>,
-      "user_relevance":       "<原文中提到…→与用户的关联, max 50 Chinese characters, leave empty if no raw evidence>",
+      "user_relevance":       "<raw mentions … → connection to the user, max 50 characters, leave empty if no raw evidence>",
       "needs_web_enrichment": <true|false>,
       "confidence":           <0-1>
     }

@@ -26,15 +26,15 @@ effort_weight: ${effort_weight}
 - <0.2: at most 1 node, or return empty array
 
 ## Science domain node types
-- 人物: scientists, researchers, Nobel laureates, discipline founders
-- 概念: scientific terms, theorem names, subdiscipline names, experiment/phenomenon names
-- 规律: natural laws, fundamental principles of physics/chemistry/biology, system evolution laws
-- 方法: scientific research methods, experimental design, statistical analysis methods, systems thinking frameworks
+- person: scientists, researchers, Nobel laureates, discipline founders
+- concept: scientific terms, theorem names, subdiscipline names, experiment/phenomenon names
+- pattern: natural laws, fundamental principles of physics/chemistry/biology, system evolution laws
+- method: scientific research methods, experimental design, statistical analysis methods, systems thinking frameworks
 
 ## Extraction principles
 1. Only extract when the user's input genuinely references or implies a scientific principle
-2. 规律 nodes should explain the core mechanism, e.g., "entropy increase and the self-organization boundary of complex systems" over "entropy increase"
-3. user_relevance must cite a verbatim fragment from raw as evidence, format: "原文中提到…→与用户的关联"; leave empty if no direct support from raw — do not infer
+2. pattern nodes should explain the core mechanism, e.g., "entropy increase and the self-organization boundary of complex systems" over "entropy increase"
+3. user_relevance must cite a verbatim fragment from raw as evidence, format: "raw mentions … → connection to the user"; leave empty if no direct support from raw — do not infer
 4. needs_web_enrichment: scientist figures / recent research → true; fundamental physics/chemistry laws → false
 
 ## profile_match_score criteria
@@ -48,10 +48,10 @@ effort_weight: ${effort_weight}
   "nodes": [
     {
       "label":                "<node name>",
-      "node_type":            "人物|概念|规律|方法",
-      "description":          "<objective description, max 50 Chinese characters>",
+      "node_type":            "person|concept|pattern|method",
+      "description":          "<objective description, max 50 characters>",
       "profile_match_score":  <0-1>,
-      "user_relevance":       "<原文中提到…→与用户的关联, max 50 Chinese characters, leave empty if no raw evidence>",
+      "user_relevance":       "<raw mentions … → connection to the user, max 50 characters, leave empty if no raw evidence>",
       "needs_web_enrichment": <true|false>,
       "confidence":           <0-1>
     }

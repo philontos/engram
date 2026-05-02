@@ -1,8 +1,10 @@
 BACKBONE = {
-    "key":         "科学",
-    "description": "自然规律、科学方法、学科基础原理、重要发现与科学家",
+    "key":         "science",
+    "name":        "Science",
+    "color":       "#10b981",
+    "description": "Natural laws, scientific method, foundational principles of disciplines, major discoveries and scientists.",
     "focus_hints": [
-        "关注用户思考中引用的科学原理和研究方法",
-        "优先提取能迁移到用户问题上的科学规律",
+        "Pick up scientific principles and research methods the user invokes.",
+        "Prioritize laws transferable to the user's situation.",
     ],
 }

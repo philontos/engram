@@ -1,8 +1,8 @@
 """全局图结构规则 — 所有主干共用，不可按域覆盖。"""
 
-NODE_TYPES = ["人物", "概念", "规律", "方法"]
+NODE_TYPES = ["person", "concept", "pattern", "method"]
 
-RELATION_TYPES = ["支撑", "对立", "推导", "相似", "关联"]
+RELATION_TYPES = ["supports", "opposes", "derives", "similar", "related"]
 
 # 关联：仅算法产出，用于保证图谱连通（同 entry 共现兜底）
 #   - 语义弱于"相似"（不要求 embedding 高相似）

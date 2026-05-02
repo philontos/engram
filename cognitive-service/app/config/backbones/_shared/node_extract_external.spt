@@ -26,7 +26,7 @@ ${existing_nodes}
    - Corresponding methodologies or counterexamples
 2. Do not restate what internal nodes already express; external nodes should bring new structural information
 3. If internal nodes are already sufficiently complete, return an empty array
-4. user_relevance: explain why this external node adds value relative to the current internal nodes or user profile; if it is an opposite, explicitly state "与 XXX 对立"; max 50 Chinese characters
+4. user_relevance: explain why this external node adds value relative to the current internal nodes or user profile; if it is an opposite, explicitly state "opposes XXX"; max 50 characters
 5. confidence: combined assessment of connection strength to internal nodes × value for filling the user's cognitive gaps
 
 ## Example opposition expansions
@@ -46,10 +46,10 @@ effort_weight: ${effort_weight}
   "nodes": [
     {
       "label":          "<node name>",
-      "node_type":      "人物|概念|规律|方法",
-      "description":    "<objective description, max 50 Chinese characters>",
+      "node_type":      "person|concept|pattern|method",
+      "description":    "<objective description, max 50 characters>",
       "confidence":     <0-1>,
-      "user_relevance": "<what this adds relative to which internal node / user profile, max 50 Chinese characters>"
+      "user_relevance": "<what this adds relative to which internal node / user profile, max 50 characters>"
     }
   ]
 }

@@ -1,5 +1,7 @@
 # cognitive-service
 
+[English](README.en.md) · **中文**
+
 个人认知记忆系统。将原始输入转化为人格画像 + 知识图谱，并支持多轮个性化查询消费。
 
 ## 整体架构
@@ -108,25 +110,22 @@ app/config/dimensions/
   situation/
 ```
 
-新增：
-
-```bash
-cp -r app/config/dimensions/_template app/config/dimensions/my_dim
-```
-
 | 文件 | 说明 |
 |------|------|
-| `config.py` | key / name / merge / summary_format 等元信息 |
+| `config.py` | key / name / enabled / merge / summary_format 等元信息 |
 | `extract.spt` | LLM 提取 prompt |
 | `rubric.md` | 各子维度评分标准 |
 
 `config.py` 关键字段：
 
 ```python
+"enabled":        True,      # False = 软关闭，跳过该维度（不删数据）
 "merge":          True,      # False = 只存 slice_features，不进 profile_dimensions
 "summary_format": "scores",  # scores | key_value | skip | free
 "sort_by_score":  True,
 ```
+
+通过 CLI 维护（推荐，见下方 [配置管理 CLI](#配置管理-cli)）；也可手动 `cp -r _template/ my_dim/`。
 
 ---
 
@@ -143,16 +142,43 @@ app/config/backbones/
   technology/
 ```
 
-新增：
-
-```bash
-cp -r app/config/backbones/_template app/config/backbones/my_domain
-```
-
 | 文件 | 说明 |
 |------|------|
-| `config.py` | key / description / focus_hints |
+| `config.py` | key / name / color / enabled / description / focus_hints |
 | `node_extract.spt` | 内源节点提取 prompt |
+
+通过 CLI 维护（推荐）；也可手动 `cp -r _template/ my_domain/`。
+
+加 / 删 backbone 后**重启服务**生效；删除后旧 DB 节点保留为 orphan domain，启动日志会有 warning，仍可被 query 链路消费但新 entry 不再写入。
+
+---
+
+## 配置管理 CLI
+
+`scripts/manage_config.py` 是 backbone / dimension 目录的统一管理脚本。两类对象命令完全对称。
+
+```bash
+# 列出所有 backbones / dimensions（含 key / name / 状态）
+python3 -m scripts.manage_config backbone  list
+python3 -m scripts.manage_config dimension list
+
+# 新增（基于 _template 复制目录，自动改写 key / name 字段）
+python3 -m scripts.manage_config backbone  add economics --name "Economics"
+python3 -m scripts.manage_config dimension add curiosity --name "Curiosity"
+
+# 软关 / 软开（修改 config.py 的 enabled 字段，不动文件不动 DB）
+python3 -m scripts.manage_config backbone  disable history
+python3 -m scripts.manage_config backbone  enable  history
+
+# 硬删（二次确认；目录与 prompt 文件全删；DB 中旧节点保留为 orphan）
+python3 -m scripts.manage_config backbone  remove history
+python3 -m scripts.manage_config dimension remove curiosity --force   # 跳过确认
+```
+
+约束：
+- `key` 必须 `[a-z][a-z0-9_]*`，会作为 DB enum 写入。
+- `add` 后仍需手工编辑 prompt 文件（`node_extract.spt` / `extract.spt` / `rubric.md`），把 `[DOMAIN NAME]` 等占位替换成实际域内容。
+- 所有操作仅改文件系统，**改完需要重启 cognitive-service 才会生效**（loader 启动时一次性装载）。
 
 ---
 

@@ -2,6 +2,7 @@ import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 import { ConfirmProvider } from '@/components/ui/ConfirmDialog'
+import { LanguageProvider } from '@/i18n'
 import './index.css'
 import App from './App.tsx'
 
@@ -14,9 +15,11 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <ConfirmProvider>
-        <App />
-      </ConfirmProvider>
+      <LanguageProvider>
+        <ConfirmProvider>
+          <App />
+        </ConfirmProvider>
+      </LanguageProvider>
     </QueryClientProvider>
   </StrictMode>,
 )

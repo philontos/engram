@@ -76,30 +76,28 @@ export default definePluginEntry({
     api.registerTool({
       name: "cognitive_query",
       description:
-        "Query the user's personal cognitive graph for personalized self-analysis. Use when the user asks about their own personality, values, cognitive patterns, decision-making tendencies, or explicitly invokes their cognitive profile.",
+        "Query the Engram cognitive agent for deep self-analysis. " +
+        "Use when the user asks questions involving their personality, values, cognitive patterns, " +
+        "decision-making tendencies, or explicitly asks to analyze using their cognitive profile. " +
+        "This tool ALONE is sufficient for the analysis flow — the question is automatically logged " +
+        "as a query record on the server side. DO NOT also call cognitive_capture_thought to 'save " +
+        "the question' unless the user EXPLICITLY asks to record it as a separate entry.",
       parameters: Type.Object({
         question: Type.String({
           description: "The user's question or topic to analyze.",
         }),
-        mode: Type.Optional(
-          Type.Union([Type.Literal("full"), Type.Literal("fast")], {
-            description:
-              "full (default): baseline + persona + graph + synthesis. fast: graph + synthesis only.",
-          })
-        ),
         continue_last: Type.Optional(
           Type.Boolean({
             description:
-              "Set true when the user is picking up an earlier conversation. Set false (default) for any new standalone question.",
+              "Set true when the user is picking up an earlier conversation. Default false for any new standalone question.",
           })
         ),
       }),
       async execute(_id, params) {
-        const mode = params.mode ?? "full";
         const continueSession = params.continue_last ?? false;
 
         console.log(
-          `[cognitive] tool cognitive_query invoked mode=${mode} continue=${continueSession}`
+          `[cognitive] tool cognitive_query invoked continue=${continueSession}`
         );
 
         let sessionId: string | undefined;
@@ -117,62 +115,87 @@ export default definePluginEntry({
           }
         }
 
-        const resp = await fetch(`${serviceUrl}/query`, {
+        const resp = await fetch(`${serviceUrl}/query/agent`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
             question: params.question,
-            mode,
             session_id: sessionId ?? null,
           }),
         });
 
         if (!resp.ok) {
           const text = await resp.text();
-          throw new Error(`Query service error ${resp.status}: ${text}`);
+          throw new Error(`Agent error ${resp.status}: ${text}`);
         }
 
-        // Consume NDJSON stream, collect graph_insight deltas as the final answer.
+        // Consume NDJSON stream — collect deltas keyed by round; the final-round
+        // text (whichever round the agent declared answer-only) is the response.
+        // intent_check shortcuts when the agent declines to engage; suggest_capture
+        // appends a follow-up hint when the question itself reads as a reflection.
         const text = await resp.text();
         const lines = text.split("\n").filter((l) => l.trim());
 
-        let insight = "";
-        let finalSessionId = sessionId;
+        const roundText: Record<number, string> = {};
+        let finalRoundIndex: number | undefined;
+        let intentMessage = "";
+        let intentNonProceed = false;
+        let shouldOfferCapture = false;
 
         for (const line of lines) {
           try {
             const event = JSON.parse(line) as {
               type: string;
-              stage?: string;
+              round?: number;
               delta?: string;
-              session_id?: string;
+              intent?: string;
               message?: string;
+              session_id?: string;
+              final_round_index?: number;
+              should_offer?: boolean;
             };
-            if (event.type === "delta" && event.stage === "graph_insight" && event.delta) {
-              insight += event.delta;
-            }
-            if (event.type === "done" && event.session_id) {
-              finalSessionId = event.session_id;
-            }
-            if (event.type === "error") {
-              throw new Error(event.message ?? "query pipeline error");
+            if (event.type === "intent_check" && event.intent && event.intent !== "proceed") {
+              intentNonProceed = true;
+              intentMessage = event.message ?? "";
+            } else if (event.type === "delta" && typeof event.round === "number" && event.delta) {
+              roundText[event.round] = (roundText[event.round] ?? "") + event.delta;
+            } else if (event.type === "done") {
+              if (typeof event.final_round_index === "number") {
+                finalRoundIndex = event.final_round_index;
+              }
+            } else if (event.type === "suggest_capture" && event.should_offer) {
+              shouldOfferCapture = true;
+            } else if (event.type === "error") {
+              throw new Error(event.message ?? "agent error");
             }
           } catch {
             // skip malformed lines
           }
         }
 
+        if (intentNonProceed) {
+          return { content: [{ type: "text" as const, text: intentMessage }] };
+        }
+
+        const finalText =
+          finalRoundIndex != null && roundText[finalRoundIndex]
+            ? roundText[finalRoundIndex]
+            : Object.values(roundText).at(-1) ?? "(no response)";
+
+        // When the question itself carries strong personal reflection, suggest
+        // the user save it as an entry. They have to ask explicitly; we never
+        // auto-capture. See cognitive-service/app/lib/capture_intent.py for the
+        // heuristic that produced this signal.
+        const out = shouldOfferCapture
+          ? `${finalText}\n\n— — —\n💭 这段反思要保存为 entry 吗？告诉我"把刚才的问题记下来"，我会用 cognitive_capture_thought 帮你保存。`
+          : finalText;
+
         console.log(
-          `[cognitive] tool cognitive_query completed session=${finalSessionId} insightLength=${insight.length}`
+          `[cognitive] tool cognitive_query completed responseLength=${out.length}`
         );
 
         return {
-          content: [
-            {
-              type: "text" as const,
-              text: insight || "(no relevant content in graph)",
-            },
-          ],
+          content: [{ type: "text" as const, text: out }],
         };
       },
     });
@@ -180,14 +203,22 @@ export default definePluginEntry({
     api.registerTool({
       name: "cognitive_capture_thought",
       description:
-        "Capture a thought, reflection, idea, observation, decision, or emotional self-analysis into the Engram cognitive graph. Use ONLY when the user is expressing how they THINK or FEEL — not for events, plans, reminders, or factual logs (Engram is not a notes app). Pass the user's text EXACTLY as written.",
+        "Capture a user's thought, reflection, idea, observation, or decision into the Engram " +
+        "cognitive graph as a new entry. " +
+        "Use ONLY when the user's intent is to RECORD / SAVE / LOG something — i.e. they want it " +
+        "preserved for future analysis. Strong signals in the user's message: 记录 / 保存 / 写下 / " +
+        "save / log / capture / remember this. " +
+        "DO NOT call this tool when the user is asking a question, requesting analysis, or seeking " +
+        "advice (\"why am I like this?\" / \"帮我分析\" / \"怎么办\" / \"咨询\" / \"how should I…\") — those " +
+        "are QUERY intents and should go to cognitive_query ALONE. The reflective content embedded " +
+        "in such a question is context for the query, NOT a new entry to capture. " +
+        "DO NOT capture facts, events, plans, reminders, or to-do items (Engram is not a notes app). " +
+        "When you do capture, pass the user's text EXACTLY as written — no paraphrase, no summary.",
       parameters: Type.Object({
-        type: Type.Literal("text"),
         content: Type.String({
           description:
             "EXACT copy of what the user said or typed — every word unchanged. Do NOT paraphrase, summarize, complete, or add anything. If the user spoke 500 words, this field must contain all 500 words.",
         }),
-        source: Type.Optional(Type.String()),
         mood: Type.Optional(
           Type.String({
             description:
@@ -201,8 +232,11 @@ export default definePluginEntry({
           `[cognitive] tool cognitive_capture_thought invoked contentLength=${params.content.length}`
         );
         const result = (await callService(serviceUrl, "/capture", {
-          ...params,
-          source: params.source ?? "openclaw",
+          type: "text",
+          content: params.content,
+          mood: params.mood,
+          tags: params.tags,
+          source: "openclaw",
         })) as {
           track: "entry" | "reject";
           id: number | null;

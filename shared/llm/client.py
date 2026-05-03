@@ -39,58 +39,101 @@ def _record_llm_call(record: dict) -> None:
         sink.append(record)
 
 
-LLM_PROVIDER = os.getenv("STRUCTURED_LLM_PROVIDER", "ark").strip().lower()
-LLM_TIMEOUT_SECONDS = float(os.getenv("STRUCTURED_LLM_TIMEOUT_SECONDS", "60"))
+LLM_TIMEOUT_SECONDS = float(os.getenv("LLM_TIMEOUT_SECONDS") or "60")
 
 
 class StructuredLLMError(RuntimeError):
     pass
 
 
-def _provider_defaults(provider: str) -> tuple[str | None, str | None]:
-    if provider == "ark":
-        return (
-            os.getenv("ARK_API_KEY"),
-            os.getenv("ARK_TEXT_MODEL"),
-        )
-    if provider == "moonshot":
-        return (
-            os.getenv("MOONSHOT_API_KEY"),
-            os.getenv("MOONSHOT_TEXT_MODEL") or "kimi-k2.5",
-        )
-    if provider == "deepseek":
-        return (
-            os.getenv("DEEPSEEK_API_KEY"),
-            os.getenv("DEEPSEEK_TEXT_MODEL") or "deepseek-chat",
-        )
-    if provider == "minimax":
-        return (
-            os.getenv("MINIMAX_TEXT_API_KEY") or os.getenv("MINIMAX_API_KEY"),
-            os.getenv("MINIMAX_TEXT_MODEL") or "MiniMax-M2.5",
-        )
-    return (None, None)
+# --------------------------------------------------------------------------
+# Provider config — universal OpenAI-compatible interface.
+#
+# Engram talks to any LLM that exposes an OpenAI-style /chat/completions
+# endpoint. To configure, set three variables:
+#
+#     LLM_BASE_URL   e.g. https://api.openai.com/v1
+#     LLM_API_KEY    your provider key
+#     LLM_MODEL      e.g. gpt-4.1, claude-sonnet-4-5, gemini-2.5-pro, ...
+#
+# Or pick a built-in preset via LLM_PROVIDER (no need to remember base_url):
+#
+#     openai | anthropic | gemini | grok | openrouter |
+#     deepseek | moonshot | qwen | glm | minimax | ark | ollama
+#
+# Anthropic and Gemini are reached via their OpenAI-compatible endpoints —
+# the client itself stays a single OpenAI-shape implementation, no per-vendor
+# adapters.
+# --------------------------------------------------------------------------
+
+# (base_url, default_model_or_None)
+_PRESETS: dict[str, tuple[str, str | None]] = {
+    "openai":     ("https://api.openai.com/v1",                    "gpt-4.1-mini"),
+    "anthropic":  ("https://api.anthropic.com/v1",                 "claude-sonnet-4-5"),
+    "gemini":     ("https://generativelanguage.googleapis.com/v1beta/openai", "gemini-2.5-flash"),
+    "grok":       ("https://api.x.ai/v1",                          "grok-4"),
+    "openrouter": ("https://openrouter.ai/api/v1",                 None),
+    "deepseek":   ("https://api.deepseek.com",                     "deepseek-chat"),
+    "moonshot":   ("https://api.moonshot.cn/v1",                   "kimi-k2.5"),
+    "qwen":       ("https://dashscope.aliyuncs.com/compatible-mode/v1", "qwen-plus"),
+    "glm":        ("https://open.bigmodel.cn/api/paas/v4",         "glm-4.6"),
+    "minimax":    ("https://api.minimax.io/v1",                    "MiniMax-M2.5"),
+    "ark":        ("https://ark.cn-beijing.volces.com/api/v3",     None),
+    "ollama":     ("http://localhost:11434/v1",                    "llama3.1"),
+}
+
+# Provider capability + verification table.
+#   json_object — supports response_format={"type":"json_object"}.
+#                 Providers not listed default to True (auto-fallback on 400).
+#   tested      — has been verified end-to-end by the maintainer.
+#                 False does NOT mean broken — it means "compatible by spec
+#                 but not yet exercised in production". Surface this honestly
+#                 in the README compatibility matrix.
+_PROVIDER_CAPS: dict[str, dict[str, bool]] = {
+    "openai":     {"json_object": True,  "tested": False},
+    "anthropic":  {"json_object": False, "tested": False},
+    "gemini":     {"json_object": True,  "tested": False},
+    "grok":       {"json_object": True,  "tested": False},
+    "openrouter": {"json_object": True,  "tested": False},
+    "deepseek":   {"json_object": True,  "tested": True},
+    "moonshot":   {"json_object": True,  "tested": False},
+    "qwen":       {"json_object": True,  "tested": False},
+    "glm":        {"json_object": True,  "tested": False},
+    "minimax":    {"json_object": True,  "tested": False},
+    "ark":        {"json_object": True,  "tested": True},
+    "ollama":     {"json_object": True,  "tested": False},
+}
 
 
-def _provider_base_url(provider: str) -> str | None:
-    if provider == "ark":
-        return "https://ark.cn-beijing.volces.com/api/v3"
-    if provider == "moonshot":
-        return "https://api.moonshot.cn/v1"
-    if provider == "deepseek":
-        return "https://api.deepseek.com"
-    if provider == "minimax":
-        return "https://api.minimax.io/v1"
-    return None
+def _provider_supports_json_object(provider: str) -> bool:
+    """Best-effort capability check; unknown providers assumed to support it
+    (we'll detect 400 and retry without)."""
+    return _PROVIDER_CAPS.get(provider, {}).get("json_object", True)
+
+
+_JSON_ONLY_HINT = (
+    "\n\nIMPORTANT: Respond with a single valid JSON object only. "
+    "No markdown fences, no prose, no explanation — JSON only."
+)
 
 
 def resolve_structured_llm_config() -> dict[str, str]:
-    provider = LLM_PROVIDER
-    api_key, default_model = _provider_defaults(provider)
-    api_key = api_key or ""
-    model = (default_model or "").strip()
-    base_url = _provider_base_url(provider) or ""
+    """Resolve LLM config from LLM_BASE_URL / LLM_API_KEY / LLM_MODEL,
+    optionally seeded by an LLM_PROVIDER preset."""
+    base_url = (os.getenv("LLM_BASE_URL") or "").strip().rstrip("/")
+    api_key = (os.getenv("LLM_API_KEY") or "").strip()
+    model = (os.getenv("LLM_MODEL") or "").strip()
+
+    provider = (os.getenv("LLM_PROVIDER") or "").strip().lower()
+    if provider and provider in _PRESETS:
+        preset_url, preset_model = _PRESETS[provider]
+        if not base_url:
+            base_url = preset_url
+        if not model and preset_model:
+            model = preset_model
+
     return {
-        "provider": provider,
+        "provider": provider or "custom",
         "api_key": api_key,
         "base_url": base_url,
         "model": model,
@@ -120,31 +163,61 @@ def _extract_json_object(text: str) -> dict[str, Any]:
             raise StructuredLLMError("Structured extraction model returned malformed JSON.") from exc
 
 
+def _looks_like_json_format_rejection(status_code: int, body: str) -> bool:
+    """Detect provider 400s where the cause is the response_format field.
+
+    Anthropic's OpenAI-compat layer (and a few others) rejects or ignores
+    response_format. We want to retry without it instead of failing.
+    """
+    if status_code != 400:
+        return False
+    needles = ("response_format", "json_object", "unsupported", "not supported")
+    low = (body or "").lower()
+    return any(n in low for n in needles)
+
+
 async def chat_json(
     *, system_prompt: str, user_prompt: str,
     stage: str = "", context: dict | None = None,
 ) -> dict[str, Any]:
+    """Get a JSON object back from the LLM, robust across providers.
+
+    Strategy (per provider capability):
+      1. Providers known to support json_object → send response_format upfront.
+      2. Providers known not to support it (Anthropic) → skip response_format,
+         rely on prompt-only JSON discipline.
+      3. Unknown providers → optimistic: try with response_format, auto-retry
+         without on a 400 that smells like a response_format rejection.
+      4. Always extract JSON via _extract_json_object so markdown fences /
+         leading prose don't kill us.
+    """
     config = resolve_structured_llm_config()
     if not is_structured_llm_configured():
         raise StructuredLLMError(
-            "Structured extraction LLM is not configured. Set STRUCTURED_LLM_PROVIDER plus the matching provider API key/model."
+            "LLM is not configured. Set LLM_BASE_URL + LLM_API_KEY + LLM_MODEL "
+            "(or LLM_PROVIDER=<preset> + LLM_API_KEY [+ LLM_MODEL])."
         )
 
-    payload = {
+    use_json_format = _provider_supports_json_object(config["provider"])
+
+    base_messages = [
+        {"role": "system", "content": (system_prompt or "") + _JSON_ONLY_HINT},
+        {"role": "user", "content": user_prompt or ""},
+    ]
+    base_payload: dict[str, Any] = {
         "model": config["model"],
         "temperature": 0.1,
-        "response_format": {"type": "json_object"},
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
+        "messages": base_messages,
     }
+    if use_json_format:
+        base_payload["response_format"] = {"type": "json_object"}
+
     prompt_chars = len(system_prompt or "") + len(user_prompt or "")
     start = time.monotonic()
 
-    try:
+    async def _post(payload: dict) -> httpx.Response:
         async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
-            resp = await client.post(
+            return await client.post(
                 f"{config['base_url']}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {config['api_key']}",
@@ -152,6 +225,18 @@ async def chat_json(
                 },
                 json=payload,
             )
+
+    try:
+        resp = await _post(base_payload)
+
+        # Auto-fallback: provider rejected response_format → retry without it.
+        if (
+            "response_format" in base_payload
+            and _looks_like_json_format_rejection(resp.status_code, resp.text)
+        ):
+            retry_payload = {k: v for k, v in base_payload.items() if k != "response_format"}
+            resp = await _post(retry_payload)
+
         duration_ms = int((time.monotonic() - start) * 1000)
 
         if resp.status_code >= 400:
@@ -168,7 +253,7 @@ async def chat_json(
 
         data = resp.json()
         usage = data.get("usage") or {}
-        record = {
+        _record_llm_call({
             "stage": stage or "unknown", "model": config["model"],
             "prompt_chars": prompt_chars,
             "prompt_tokens": int(usage.get("prompt_tokens", 0)),
@@ -176,8 +261,7 @@ async def chat_json(
             "total_tokens": int(usage.get("total_tokens", 0)),
             "duration_ms": duration_ms, "context": context or {},
             "status": "ok",
-        }
-        _record_llm_call(record)
+        })
 
         try:
             content = data["choices"][0]["message"]["content"]

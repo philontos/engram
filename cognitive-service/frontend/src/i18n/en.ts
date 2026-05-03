@@ -8,6 +8,7 @@ const dict: Dict = {
   common: {
     cancel:        'Cancel',
     confirm:       'Confirm',
+    ok:            'OK',
     delete:        'Delete',
     save:          'Save',
     edit:          'Edit',
@@ -131,8 +132,6 @@ const dict: Dict = {
     based_on_n:            'based on {n} entries',
     no_data:               'No data',
     no_evolution:          'No evolution data yet',
-    chart_ocean:           'OCEAN personality evolution',
-    chart_schwartz:        'Schwartz values evolution',
   },
 
   entries: {
@@ -156,7 +155,8 @@ const dict: Dict = {
     delete_message:        'Will also remove the linked slice and activation records. Cannot be undone.',
     revert_title:          'Revert Entry #{id}',
     revert_message:        'Will roll back this entry\'s effect on the graph and profile; the entry status becomes reverted.{cascade}',
-    revert_cascade_note:   '\n\nWill cascade-revert {n} later entries.',
+    revert_blocked_title:  'Revert in order',
+    revert_blocked_msg:    'There are {n} newer processed entries on top of this one. Revert them first (newest first) before reverting this one.',
     revert_failed:         'Revert failed: {error}',
     nodes_edges:           '{nodes} nodes, {edges} edges',
     status_captured:       'pending',

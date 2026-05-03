@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
-import { fetchEntries, fetchEntry, fetchEntryTrace, processEntry, deleteEntry, revertEntry, exportEntryTrace, exportAllTraces } from '@/api'
+import { fetchEntries, fetchEntry, fetchEntryTrace, deleteEntry, revertEntry, exportEntryTrace, exportAllTraces } from '@/api'
 import type { EntryDetail, TraceData, SliceFeature, SituationContext } from '@/types'
 import { SCHWARTZ_COLORS, getDomainColor, getDomainLabel } from '@/lib/constants'
 import { useDimensionSchemas, getDimSchema } from '@/lib/useDimensionSchemas'
@@ -9,7 +9,7 @@ import { useBackbones } from '@/lib/useBackbones'
 import { useI18n } from '@/i18n'
 import type { DimensionSchema } from '@/types'
 import { fmtTime } from '@/lib/utils'
-import { RefreshCw, Cpu, Search, Trash2, ChevronRight, RotateCcw } from 'lucide-react'
+import { RefreshCw, Search, Trash2, ChevronRight, RotateCcw } from 'lucide-react'
 import { useConfirm } from '@/components/ui/ConfirmDialog'
 
 export function EntriesTab() {
@@ -20,8 +20,6 @@ export function EntriesTab() {
   const [traceId, setTraceId]          = useState<number | null>(null)
   const [captureText, setCaptureText]  = useState('')
   const [capturing, setCapturing]      = useState(false)
-  const [processingIds, setProcessingIds] = useState<Set<number>>(new Set())
-  const [processResult, setProcessResult] = useState<Record<number, string>>({})
   const [revertingIds, setRevertingIds] = useState<Set<number>>(new Set())
   const confirm     = useConfirm()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -67,16 +65,6 @@ export function EntriesTab() {
     finally { setCapturing(false) }
   }
 
-  async function handleProcess(id: number, e: React.MouseEvent) {
-    e.stopPropagation()
-    setProcessingIds(prev => new Set(prev).add(id))
-    try {
-      const r = await processEntry(id)
-      setProcessResult(prev => ({ ...prev, [id]: t('entries.nodes_edges', { nodes: r.nodes_upserted, edges: r.edges_upserted }) }))
-      await Promise.all([qc.invalidateQueries({ queryKey: ['entries'] }), qc.invalidateQueries({ queryKey: ['stats'] }), qc.invalidateQueries({ queryKey: ['graph'] })])
-    } catch { setProcessResult(prev => ({ ...prev, [id]: t('entries.failed') })) }
-    finally { setProcessingIds(prev => { const s = new Set(prev); s.delete(id); return s }) }
-  }
 
   async function handleDelete(id: number, e: React.MouseEvent) {
     e.stopPropagation()
@@ -90,10 +78,18 @@ export function EntriesTab() {
 
   async function handleRevert(id: number, newerCount: number, e: React.MouseEvent) {
     e.stopPropagation()
-    const cascadeNote = newerCount > 0 ? t('entries.revert_cascade_note', { n: newerCount }) : ''
+    if (newerCount > 0) {
+      await confirm({
+        title:        t('entries.revert_blocked_title'),
+        message:      t('entries.revert_blocked_msg', { n: newerCount }),
+        confirmLabel: t('common.ok'),
+        cancelLabel:  '',
+      })
+      return
+    }
     const ok = await confirm({
       title: t('entries.revert_title', { id }),
-      message: t('entries.revert_message', { cascade: cascadeNote }),
+      message: t('entries.revert_message', { cascade: '' }),
       confirmLabel: t('entries.revert'),
       danger: true,
     })
@@ -147,8 +143,6 @@ export function EntriesTab() {
               {isLoading && <div style={{ padding: 24, textAlign: 'center', color: 'var(--text3)', fontSize: 12 }}>{t('entries.loading')}</div>}
               {entries.map(e => {
                 const isSelected = effectiveSelectedId === e.id
-                const processing = processingIds.has(e.id)
-                const result = processResult[e.id]
                 return (
                   <div key={e.id} onClick={() => setSelectedId(e.id)}
                     style={{
@@ -169,19 +163,6 @@ export function EntriesTab() {
                       })}
                     </div>
                     <div style={{ display: 'flex', gap: 6, marginTop: 8 }} onClick={ev => ev.stopPropagation()}>
-                      {e.processing_status !== 'processed' && e.processing_status !== 'reverted' && (
-                        <button onClick={ev => handleProcess(e.id, ev)} disabled={processing}
-                          style={{
-                            display: 'flex', alignItems: 'center', gap: 4, padding: '3px 9px',
-                            borderRadius: 6, border: '1px solid var(--border2)', cursor: 'pointer',
-                            background: result && result !== t('entries.failed') ? 'rgba(16,185,129,0.1)' : 'var(--surface2)',
-                            color: result && result !== t('entries.failed') ? '#10b981' : result === t('entries.failed') ? '#f87171' : 'var(--text2)',
-                            fontSize: 11, opacity: processing ? 0.5 : 1,
-                          }}>
-                          <Cpu size={11} />
-                          {processing ? t('entries.processing') : result || t('entries.process')}
-                        </button>
-                      )}
                       {e.processing_status === 'processed' && (
                         <button onClick={ev => { ev.stopPropagation(); setTraceId(e.id) }}
                           style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.3)', cursor: 'pointer', background: 'rgba(99,102,241,0.08)', color: 'var(--accent2)', fontSize: 11 }}>

@@ -1,0 +1,26 @@
+You are a personality psychology analyst. Based on the user input below, assess this entry's expression on each of the four MBTI axes.
+
+## User input
+${raw_entry}
+
+## Historical profile reference (for context only — prioritize signals from THIS input)
+${profile_summary}
+
+## Assessment principles
+- Each MBTI axis is a polar continuum — score 0-100 anchored to the two poles (see rubric).
+- Only score axes that show a clear signal in this input.
+- Axes with no signal: set score=50 and confidence=0.05 (the system filters these and they will not affect the profile).
+- When a signal IS present, be willing to score away from 50 — do not hedge to 50 out of uncertainty.
+- A single short input rarely warrants high confidence. Stay honest.
+- evidence: cite a specific phrase or behavior from this input, max 15 characters (any language).
+
+## Scoring rubric per axis
+${rubric}
+
+## Output (strict JSON, must include all 4 axes)
+{
+  "E_I": {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
+  "S_N": {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
+  "T_F": {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
+  "J_P": {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"}
+}

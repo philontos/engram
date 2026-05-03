@@ -1,14 +1,55 @@
+"""Embedding client — universal OpenAI-compatible /embeddings endpoint.
+
+Configure with three vars (each falls back to the matching LLM_* if unset):
+
+    EMBED_BASE_URL   default: LLM_BASE_URL
+    EMBED_API_KEY    default: LLM_API_KEY
+    EMBED_MODEL      e.g. text-embedding-3-small / doubao-embedding-text-240715 / ...
+"""
+
 import os
-from volcenginesdkarkruntime import AsyncArk
 
-client = AsyncArk(api_key=os.environ.get("ARK_API_KEY"))
+import httpx
 
-EMBED_MODEL = os.getenv("DOUBAO_EMBED_MODEL", "ep-20260330172714-b6ll6")
+
+_DEFAULT_TIMEOUT = float(os.getenv("EMBED_TIMEOUT_SECONDS", "30"))
+
+
+def _resolve_config() -> tuple[str, str, str]:
+    base_url = (
+        os.getenv("EMBED_BASE_URL") or os.getenv("LLM_BASE_URL") or ""
+    ).strip().rstrip("/")
+    api_key = (
+        os.getenv("EMBED_API_KEY") or os.getenv("LLM_API_KEY") or ""
+    ).strip()
+    model = (os.getenv("EMBED_MODEL") or "").strip()
+    return base_url, api_key, model
 
 
 async def embed(text: str) -> list[float]:
-    resp = await client.multimodal_embeddings.create(
-        model=EMBED_MODEL,
-        input=[{"type": "text", "text": text}],
-    )
-    return resp.data.embedding
+    base_url, api_key, model = _resolve_config()
+    if not (base_url and api_key and model):
+        raise RuntimeError(
+            "Embedding model not configured. Set EMBED_MODEL "
+            "(and EMBED_API_KEY / EMBED_BASE_URL if different from LLM_*)."
+        )
+
+    payload = {"model": model, "input": text}
+    async with httpx.AsyncClient(timeout=_DEFAULT_TIMEOUT) as client:
+        resp = await client.post(
+            f"{base_url}/embeddings",
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json=payload,
+        )
+    if resp.status_code >= 400:
+        raise RuntimeError(
+            f"Embedding request failed: status={resp.status_code} body={resp.text[:400]}"
+        )
+    data = resp.json()
+    try:
+        return data["data"][0]["embedding"]
+    except (KeyError, IndexError, TypeError) as exc:
+        raise RuntimeError("Embedding response shape unexpected.") from exc

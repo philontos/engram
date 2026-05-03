@@ -1,16 +1,17 @@
 /**
  * fmtTime: relative time formatter, language-aware.
  *
- * Pure function on purpose — call sites that already have an `lang` (from
- * useI18n) or a translator can pass it in. The default `lang='zh'` keeps
- * existing call sites working until they migrate.
+ * The lang defaults to whichever language the LanguageProvider currently has
+ * active (via getActiveLang) so call sites don't need to thread it through.
+ * An explicit `lang` argument still wins when provided.
  */
 import zh from '@/i18n/zh'
 import en from '@/i18n/en'
-import type { Lang } from '@/i18n'
+import { getActiveLang, type Lang } from '@/i18n'
 
-export function fmtTime(s: string, lang: Lang = 'zh'): string {
-  const dict = lang === 'en' ? en : zh
+export function fmtTime(s: string, lang?: Lang): string {
+  const effective = lang ?? getActiveLang()
+  const dict = effective === 'en' ? en : zh
   if (!s) return dict.common.empty_dash
   // SQLite returns UTC without timezone suffix; append Z so browsers don't misinterpret as local time
   const hasTz = /Z$|[+-]\d{2}:?\d{2}$/.test(s)

@@ -11,6 +11,7 @@ const dict = {
   common: {
     cancel:        '取消',
     confirm:       '确认',
+    ok:            '我知道了',
     delete:        '删除',
     save:          '保存',
     edit:          '编辑',
@@ -134,8 +135,6 @@ const dict = {
     based_on_n:            '基于 {n} 条记忆',
     no_data:               '暂无数据',
     no_evolution:          '暂无演化数据',
-    chart_ocean:           'OCEAN 人格演化',
-    chart_schwartz:        'Schwartz 价值观演化',
   },
 
   entries: {
@@ -159,7 +158,8 @@ const dict = {
     delete_message:        '将同时删除关联的切片和激活记录，无法恢复。',
     revert_title:          '撤销 Entry #{id}',
     revert_message:        '将回滚该条记忆对图谱和画像的影响，entry 状态变为 reverted。{cascade}',
-    revert_cascade_note:   '\n\n将同时级联撤销之后的 {n} 条记忆。',
+    revert_blocked_title:  '请按顺序撤销',
+    revert_blocked_msg:    '在它之上还有 {n} 条更新的已处理记忆。请先按从新到旧的顺序撤销那些，再来撤销这一条。',
     revert_failed:         '撤销失败: {error}',
     nodes_edges:           '{nodes}节点 {edges}边',
     status_captured:       '待处理',

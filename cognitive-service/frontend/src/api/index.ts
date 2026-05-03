@@ -89,7 +89,10 @@ export const fetchBackbones = () =>
   req<{ backbones: BackboneSchema[]; orphan_domains: string[] }>('/ui/api/backbones')
 
 export type EvolutionPoint = { entry_id: number; date: string; score: number; confidence: number }
-export type ProfileEvolution = { ocean: Record<string, EvolutionPoint[]>; schwartz: Record<string, EvolutionPoint[]> }
+// Generic shape: { [dim_key]: { [sub_key]: EvolutionPoint[] } }.
+// Dim/sub keys are driven by backend config (DIMENSIONS), so any enabled
+// score-format dimension shows up automatically — no FE changes required.
+export type ProfileEvolution = Record<string, Record<string, EvolutionPoint[]>>
 export const fetchProfileEvolution = () => req<ProfileEvolution>('/ui/api/profile/evolution')
 
 // ── Query Logs ────────────────────────────────────────────────────────────────

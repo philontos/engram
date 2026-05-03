@@ -2,9 +2,33 @@
 
 **English** · [中文](README.zh.md)
 
-> Your thoughts, mapped. Engram turns the way you *think* into a structure your AI can finally see.
+> **Engram — the part of you that your AI has been missing.**
 
-Engram captures the cognitive content of your day — thoughts, reflections, ideas, decisions, observations — and builds a structured personality profile + knowledge graph from them. Over time, your AI tools stop replying to your messages and start replying to *you*.
+Most AI tools answer your question. Engram answers *you*.
+
+It quietly builds a model of how you think — your values, fears, recurring patterns, the contradictions you can't see from the inside. Then any AI you connect (Claude, Cursor, Codex…) stops being a smart stranger and starts being something closer to a coach who's known you for years.
+
+Not a notes app. Not a memory layer. A **personal cognitive mirror** — built to surface the blind spots that hold you back, and the breakthroughs you didn't know were already in you.
+
+---
+
+### A glimpse of what that feels like
+
+> **You:** I'm always timid. Back in school my girlfriend once joked "I'll kill you" and I froze. I keep catastrophizing — why?
+>
+> **Engram:** This isn't timidity. It's a conditioned fear loop traced back to a specific childhood pattern in your records — the one where a close caregiver's pressure could freeze a room in seconds. Three reinforcers compound it:
+>
+> - Defensive-pessimism mechanism (**strength = 0.92**, the strongest node in your map) — you pre-emptively brace for the worst so reality can't blindside you. The cost: you live inside "something bad is about to happen."
+> - High **neuroticism (84)** + strong **prevention-focus (84)** — your brain scans the environment for threat signals, not safety signals.
+> - Old loop generalized — your wife's frustration, a joke from a partner, public speaking… all trigger the same childhood template.
+>
+> You already have the antidotes inside your own map (cognitive defusion 0.78, cognitive reframing 0.81). They're just not loaded yet. Four moves: defuse ("I notice fear is showing up" — not "I'm afraid"); three-column reframe; small exposure experiments to feed the brain new data; externalize ("I have a fear loop, can you say it differently?") instead of "I have a problem."
+>
+> The fear is a survival strategy from a child who needed it. That child is gone. Your brain just hasn't gotten the memo — only action sends the new signal.
+
+No other memory tool can produce this answer, because no other memory tool has a model of you to reason from.
+
+---
 
 **Engram is not a notes app.** Don't use it to log what you ate for lunch. Use it when you catch yourself thinking, doubting, deciding, realizing. Pure factual logs are politely declined at the gate.
 
@@ -53,7 +77,8 @@ cd engram
 
 # Configure your LLM API key
 cp cognitive-service/.env.example cognitive-service/.env
-# Edit cognitive-service/.env: set ARK_API_KEY, ARK_TEXT_MODEL, ARK_EMBEDDING_MODEL
+# Edit cognitive-service/.env: set LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, EMBED_MODEL
+# (or pick a preset via LLM_PROVIDER — see Configuration below)
 
 # Build the dashboard UI
 pnpm --prefix cognitive-service/frontend install
@@ -191,18 +216,66 @@ engram/
 
 ## Configuration
 
-### LLM
+### LLM — one universal interface, any provider
 
-Engram uses an OpenAI-compatible API for all LLM calls. Configure in `cognitive-service/.env`:
+Engram talks to any LLM that exposes an OpenAI-style `/chat/completions` endpoint. **You only configure three things**, and both streaming and non-streaming are handled automatically:
 
 ```env
-ARK_API_KEY=your_key
-ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
-ARK_TEXT_MODEL=your_model_id
-ARK_EMBEDDING_MODEL=your_embedding_model_id
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=sk-...
+LLM_MODEL=gpt-4.1-mini
 ```
 
-Any OpenAI-compatible endpoint works (OpenAI, DeepSeek, local Ollama, etc.).
+That's it. No per-provider flags, no streaming toggle.
+
+**Or pick a preset** — just set `LLM_PROVIDER` + `LLM_API_KEY` (+ `LLM_MODEL` if you want to override the default):
+
+| Preset | Provider | Notes |
+|--------|----------|-------|
+| `openai`     | OpenAI                | GPT-4.1 / GPT-5 / o-series |
+| `anthropic`  | Anthropic Claude      | Via Anthropic's OpenAI-compatible endpoint |
+| `gemini`     | Google Gemini         | Via Gemini's OpenAI-compatible endpoint |
+| `grok`       | xAI Grok              | |
+| `openrouter` | OpenRouter            | One key, hundreds of models |
+| `deepseek`   | DeepSeek              | |
+| `moonshot`   | Moonshot Kimi         | |
+| `qwen`       | Alibaba Qwen / DashScope | OpenAI-compat mode |
+| `glm`        | Zhipu GLM (智谱)      | |
+| `minimax`    | MiniMax               | |
+| `ark`        | Volcengine ARK / Doubao | |
+| `ollama`     | Local Ollama          | `http://localhost:11434/v1` |
+
+Any other OpenAI-compatible endpoint (vLLM, LM Studio, LiteLLM, Together, Groq, Fireworks, …) works via Option A above.
+
+#### Compatibility status — honest matrix
+
+Engram speaks one universal protocol (OpenAI-compatible chat completions + tool calling), so most providers should "just work." We mark below what's been **verified end-to-end in production** vs. what's **expected to work but not yet exercised**. Reports from the field are very welcome — open an issue if anything misbehaves.
+
+| Provider | Chat | Tool calling | JSON pipeline | Status |
+|---|---|---|---|---|
+| DeepSeek          | ✅ | ✅ | ✅ | **Verified** |
+| ARK / Doubao      | ✅ | ✅ | ✅ | **Verified** (also used for embeddings) |
+| OpenAI            | ✅ | ✅ | ✅ | Compatible by spec — untested |
+| Anthropic Claude  | ✅ | ✅ | ✅ via prompt fallback | Compatible by spec — untested |
+| Google Gemini     | ✅ | ✅ | ✅ | Compatible by spec — untested |
+| xAI Grok          | ✅ | ✅ | ✅ | Compatible by spec — untested |
+| Moonshot Kimi     | ✅ | ✅ | ✅ | Compatible by spec — untested |
+| Alibaba Qwen      | ✅ | ✅ | ✅ | Compatible by spec — untested |
+| Zhipu GLM         | ✅ | ✅ | ✅ | Compatible by spec — untested |
+| MiniMax           | ✅ | ✅ | ✅ | Compatible by spec — untested |
+| OpenRouter        | ✅ | depends on routed model | depends | Compatible by spec — untested |
+| Ollama (local)    | ✅ | model-dependent (llama3.1+ / qwen2.5+ / gpt-oss) | ✅ | Compatible by spec — untested |
+
+> **Embedding note**: Anthropic, DeepSeek, Moonshot don't ship embedding models — pair them with an embedding provider that does (OpenAI / GLM / Qwen / ARK / Ollama / Voyage / Jina) via `EMBED_BASE_URL` + `EMBED_API_KEY` + `EMBED_MODEL`.
+
+### Embedding
+
+Embeddings use the same OpenAI-compatible `/embeddings` shape and **fall back to `LLM_*` automatically**, so you usually only set the model:
+
+```env
+EMBED_MODEL=text-embedding-3-small
+# EMBED_BASE_URL / EMBED_API_KEY — only needed if your embedding provider differs from the chat provider
+```
 
 ### Adding a dimension
 

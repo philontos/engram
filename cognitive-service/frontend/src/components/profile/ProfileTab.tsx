@@ -193,9 +193,11 @@ function EvolutionChart({ title, series }: {
   series: { key: string; label: string; color: string; points: EvolutionPoint[] }[]
 }) {
   const { t } = useI18n()
-  const allIds = Array.from(
-    new Set(series.flatMap(s => s.points.map(p => p.entry_id)))
-  ).sort((a, b) => a - b)
+  // Build a map of entry_id → date so x-axis ticks can show readable dates
+  // instead of an impossible-to-read run of #ids.
+  const idToDate = new Map<number, string>()
+  series.forEach(s => s.points.forEach(p => { if (!idToDate.has(p.entry_id)) idToDate.set(p.entry_id, p.date) }))
+  const allIds = Array.from(idToDate.keys()).sort((a, b) => a - b)
 
   if (allIds.length === 0) return (
     <div style={{ color: 'var(--text3)', fontSize: 12 }}>{t('profile.no_data')}</div>
@@ -206,6 +208,16 @@ function EvolutionChart({ title, series }: {
   const ch = H - PT - PB
   const xOf = (i: number) => PL + (allIds.length === 1 ? cw / 2 : (i / (allIds.length - 1)) * cw)
   const yOf = (score: number) => PT + ch - (score / 100) * ch
+
+  // Cap visible x-axis labels to ~6 evenly-spaced ticks. Every other position
+  // still gets a small tick mark so the density of underlying data is visible.
+  const MAX_LABELS = 6
+  const labelStride = Math.max(1, Math.ceil(allIds.length / MAX_LABELS))
+  const labelIndexes = new Set<number>()
+  for (let i = 0; i < allIds.length; i += labelStride) labelIndexes.add(i)
+  labelIndexes.add(allIds.length - 1)  // always show the most recent
+  // mm-dd from "yyyy-mm-dd"
+  const shortDate = (iso: string) => (iso || '').slice(5, 10) || '—'
 
   return (
     <div style={{ background: 'var(--surface)', border: '1px solid var(--border)', borderRadius: 14, padding: '18px 20px', flex: '1 1 340px', minWidth: 0 }}>
@@ -218,9 +230,21 @@ function EvolutionChart({ title, series }: {
             <text x={PL - 4} y={yOf(v) + 4} fontSize={8} fill="var(--text3)" textAnchor="end">{v}</text>
           </g>
         ))}
-        {allIds.map((id, i) => (
-          <text key={id} x={xOf(i)} y={H - 2} fontSize={8} fill="var(--text3)" textAnchor="middle">#{id}</text>
-        ))}
+        {allIds.map((id, i) => {
+          const showLabel = labelIndexes.has(i)
+          return (
+            <g key={id}>
+              <line x1={xOf(i)} y1={H - PB + 2} x2={xOf(i)}
+                y2={H - PB + (showLabel ? 6 : 4)}
+                stroke="var(--border)" strokeWidth={showLabel ? 1 : 0.5} />
+              {showLabel && (
+                <text x={xOf(i)} y={H - 2} fontSize={9} fill="var(--text3)" textAnchor="middle">
+                  {shortDate(idToDate.get(id) || '')}
+                </text>
+              )}
+            </g>
+          )
+        })}
         {series.map(s => {
           const indexed = allIds
             .map((id, i) => ({ i, pt: s.points.find(p => p.entry_id === id) }))
@@ -233,7 +257,7 @@ function EvolutionChart({ title, series }: {
               {indexed.map(({ i, pt }) => (
                 <circle key={`${s.key}-${i}`} cx={xOf(i)} cy={yOf(pt!.score)} r={3}
                   fill={s.color} opacity={0.6 + pt!.confidence * 0.4}>
-                  <title>{s.label}: {Math.round(pt!.score)} (c={pt!.confidence.toFixed(2)})</title>
+                  <title>{`${s.label}: ${Math.round(pt!.score)} (c=${pt!.confidence.toFixed(2)})  ·  ${pt!.date}  ·  #${pt!.entry_id}`}</title>
                 </circle>
               ))}
             </g>
@@ -254,24 +278,29 @@ function EvolutionChart({ title, series }: {
 
 function EvolutionPanel({ evolution }: { evolution: ProfileEvolution }) {
   const { t } = useI18n()
-  const oceanSeries = Object.entries(evolution.ocean).map(([k, pts]) => ({
-    key: k, label: k,
-    color: OCEAN_COLORS[k] || '#888', points: pts,
-  }))
+  const schemas = useDimensionSchemas()
 
-  const schwartzSeries = Object.entries(evolution.schwartz).map(([k, pts], i) => ({
-    key: k, label: k,
-    color: SCHWARTZ_COLORS[i % SCHWARTZ_COLORS.length], points: pts,
-  }))
+  const dimEntries = Object.entries(evolution).filter(([, sub]) => Object.keys(sub).length > 0)
 
-  if (oceanSeries.length === 0 && schwartzSeries.length === 0) return (
+  if (dimEntries.length === 0) return (
     <div style={{ color: 'var(--text3)', fontSize: 13 }}>{t('profile.no_evolution')}</div>
   )
 
   return (
     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 20, alignContent: 'flex-start' }}>
-      {oceanSeries.length > 0 && <EvolutionChart title={t('profile.chart_ocean')} series={oceanSeries} />}
-      {schwartzSeries.length > 0 && <EvolutionChart title={t('profile.chart_schwartz')} series={schwartzSeries} />}
+      {dimEntries.map(([dimKey, subMap]) => {
+        const schema = getDimSchema(schemas, dimKey)
+        const title = schema?.name || dimKey
+        const series = Object.entries(subMap).map(([subKey, pts], i) => {
+          // OCEAN keeps its semantic colour map; everything else cycles the
+          // shared palette so new dimensions look distinguishable out of the box.
+          const color = dimKey === 'ocean'
+            ? (OCEAN_COLORS[subKey] || SCHWARTZ_COLORS[i % SCHWARTZ_COLORS.length])
+            : SCHWARTZ_COLORS[i % SCHWARTZ_COLORS.length]
+          return { key: subKey, label: subKey, color, points: pts }
+        })
+        return <EvolutionChart key={dimKey} title={title} series={series} />
+      })}
     </div>
   )
 }

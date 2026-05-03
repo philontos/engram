@@ -555,7 +555,22 @@ def export_all_traces():
 
 @router.get("/profile/evolution")
 def profile_evolution():
-    """返回 OCEAN 和 Schwartz 各子维度随时间的分数序列，基于 profile_snapshots。"""
+    """Time series of every score-format dimension's sub-keys.
+
+    Driven by config — any enabled dimension with summary_format='scores' and
+    merge=True automatically shows up. Shape:
+        { "<dim_key>": { "<sub_key>": [{entry_id, date, score, confidence}] } }
+    Sub-keys with no datapoints across all snapshots are pruned.
+    """
+    score_dims = [
+        d for d in DIMENSIONS
+        if d.get("enabled", True)
+        and d.get("merge", True)
+        and d.get("summary_format") == "scores"
+    ]
+    if not score_dims:
+        return {}
+
     with get_conn() as conn:
         rows = conn.execute(
             """SELECT ps.entry_id, ps.snapshot_json, e.created_at
@@ -564,13 +579,17 @@ def profile_evolution():
                ORDER BY e.created_at ASC"""
         ).fetchall()
 
-    ocean_keys    = ["O", "C", "E", "A", "N"]
-    schwartz_keys = ["universalism", "benevolence", "conformity", "tradition",
-                     "security", "power", "achievement", "hedonism",
-                     "stimulation", "self_direction"]
-
-    ocean_series:    dict[str, list] = {k: [] for k in ocean_keys}
-    schwartz_series: dict[str, list] = {k: [] for k in schwartz_keys}
+    # Pre-build empty series per (dim, sub_key) when sub_dimensions are declared.
+    # When a dimension declares no sub_dimensions, we discover keys from the
+    # snapshot data on the fly.
+    series: dict[str, dict[str, list]] = {}
+    declared_subs: dict[str, list[str] | None] = {}
+    for d in score_dims:
+        dim_key = d["key"]
+        subs = d.get("sub_dimensions") or []
+        sub_keys = [s["key"] for s in subs if s.get("key")]
+        declared_subs[dim_key] = sub_keys or None
+        series[dim_key] = {k: [] for k in sub_keys}
 
     for row in rows:
         try:
@@ -580,33 +599,29 @@ def profile_evolution():
         date = (row["created_at"] or "")[:10]
         entry_id = row["entry_id"]
 
-        ocean = snap.get("ocean", {})
-        for k in ocean_keys:
-            v = ocean.get(k)
-            if isinstance(v, dict) and "score" in v:
-                ocean_series[k].append({
-                    "entry_id": entry_id,
-                    "date": date,
-                    "score": round(float(v["score"]), 2),
+        for dim_key, sub_map in series.items():
+            data = snap.get(dim_key, {})
+            if not isinstance(data, dict):
+                continue
+            keys_to_walk = declared_subs[dim_key] or list(data.keys())
+            for k in keys_to_walk:
+                v = data.get(k)
+                if not isinstance(v, dict) or "score" not in v:
+                    continue
+                sub_map.setdefault(k, []).append({
+                    "entry_id":   entry_id,
+                    "date":       date,
+                    "score":      round(float(v["score"]), 2),
                     "confidence": round(float(v.get("confidence", 0)), 3),
                 })
 
-        schwartz = snap.get("schwartz", {})
-        for k in schwartz_keys:
-            v = schwartz.get(k)
-            if isinstance(v, dict) and "score" in v:
-                schwartz_series[k].append({
-                    "entry_id": entry_id,
-                    "date": date,
-                    "score": round(float(v["score"]), 2),
-                    "confidence": round(float(v.get("confidence", 0)), 3),
-                })
-
-    # 过滤掉全程没有数据的子维度
-    ocean_series    = {k: v for k, v in ocean_series.items() if v}
-    schwartz_series = {k: v for k, v in schwartz_series.items() if v}
-
-    return {"ocean": ocean_series, "schwartz": schwartz_series}
+    # prune empty sub-keys; prune dims that ended up entirely empty
+    pruned: dict[str, dict[str, list]] = {}
+    for dim_key, sub_map in series.items():
+        filtered = {k: v for k, v in sub_map.items() if v}
+        if filtered:
+            pruned[dim_key] = filtered
+    return pruned
 
 
 @router.get("/profile")

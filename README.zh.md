@@ -2,9 +2,33 @@
 
 [English](README.md) · **中文**
 
-> 把你的"思考"映射出来。Engram 让 AI 终于能看见你的*思维结构*，而不是只看见你的字。
+> **Engram — AI 一直缺失的那部分"你"。**
 
-Engram 只收一种东西：你日常的思考内容——想法、反思、洞察、决策、自我观察。它把这些累积成一份结构化的人格画像 + 知识图谱。一段时间后，你的 AI 工具不再是在"回复你的消息"，而是在"回应你这个人"。
+大多数 AI 在回答"你的问题"。Engram 让 AI 回应"你这个人"。
+
+它在背后悄悄建模你的思考方式——你的价值观、恐惧、反复出现的模式、你从内部看不见的那些自相矛盾。然后你接入的任何 AI（Claude、Cursor、Codex…）都不再是个聪明的陌生人，而更像一位认识你多年的成长教练。
+
+不是笔记 app，不是记忆层。是一面**私人认知之镜**——照亮挡住你的盲区，唤出你自己都没意识到的突破。
+
+---
+
+### 它的回答会是什么样
+
+> **你：** 我总是胆子小，之前在学校时女朋友开玩笑说"杀了我"，我都吓到不行。总是灾难化、预设最差结果，怎么办？
+>
+> **Engram：** 这不是胆子小，是一条从童年开始建造、已经高度自动化的恐惧回路。从你之前的记录里能追到很清晰的因果链——某位重要长辈那种瞬间凝固空气的压制感，在你大脑里刻下了一个非条件反射。三个放大器叠加：
+>
+> - 预期差防御机制（**strength = 0.92**，是你认知图景中最强的节点）——你提前把预期压到最低，这样不会被现实打脸。代价是你永远活在"坏事即将发生"里。
+> - 高**神经质（84）** + 强**预防焦点（84）**——大脑天然扫描威胁信号，而不是安全信号。
+> - 旧回路被泛化——老婆拌嘴、伴侣开玩笑、公开发言、人多场合……触发的都是同一个童年模板。
+>
+> 你图景里其实已经有解药（认知解离 0.78、认知重构 0.81），只是还没被加载使用。四步：解离（"我注意到恐惧出现了"，而不是"我害怕"）；三栏重构；小型暴露实验，给大脑投喂新数据；把问题外化（"我有一个恐惧回路，你能换个说法吗？"），而不是"我有病"。
+>
+> 那个恐惧是当年那个孩子为了生存发展出来的策略。那个孩子已经走了。你的大脑只是还没收到这个通知——光想没用，只能用行动给它发新信号。
+
+没有其他记忆工具能给出这种回答——因为它们没有一份关于"你"的模型可以推演。
+
+---
 
 **Engram 不是笔记 app。** 别用它记"今天午饭吃了什么"。用它捕捉那些你正在思考、犹豫、决定、意识到的瞬间。纯事件流水会在意图门被礼貌挡回。
 
@@ -53,7 +77,8 @@ cd engram
 
 # 配置 LLM API 密钥
 cp cognitive-service/.env.example cognitive-service/.env
-# 编辑 cognitive-service/.env：填写 ARK_API_KEY、ARK_TEXT_MODEL、ARK_EMBEDDING_MODEL
+# 编辑 cognitive-service/.env：填写 LLM_BASE_URL、LLM_API_KEY、LLM_MODEL、EMBED_MODEL
+# （或者用 LLM_PROVIDER 选预设——见下面的 Configuration 章节）
 
 # 构建 Dashboard 前端
 pnpm --prefix cognitive-service/frontend install
@@ -191,18 +216,66 @@ engram/
 
 ## 配置
 
-### LLM
+### LLM — 一套通用接入层，任意模型
 
-Engram 用 OpenAI 兼容 API 调用所有 LLM。在 `cognitive-service/.env` 配置：
+Engram 对接所有暴露 OpenAI 风格 `/chat/completions` 端点的 LLM。**只需配置三个变量**，流式 / 非流式都自动支持：
 
 ```env
-ARK_API_KEY=your_key
-ARK_BASE_URL=https://ark.cn-beijing.volces.com/api/v3
-ARK_TEXT_MODEL=your_model_id
-ARK_EMBEDDING_MODEL=your_embedding_model_id
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=sk-...
+LLM_MODEL=gpt-4.1-mini
 ```
 
-任何 OpenAI 兼容端点都可（OpenAI、DeepSeek、本地 Ollama 等）。
+就这样。没有 provider 开关，没有流式开关。
+
+**也可以用预设**——只填 `LLM_PROVIDER` + `LLM_API_KEY`（想覆盖默认模型再加 `LLM_MODEL`）：
+
+| 预设 | 提供商 | 备注 |
+|------|--------|------|
+| `openai`     | OpenAI                | GPT-4.1 / GPT-5 / o 系列 |
+| `anthropic`  | Anthropic Claude      | 走 Anthropic 官方 OpenAI 兼容端点 |
+| `gemini`     | Google Gemini         | 走 Gemini 官方 OpenAI 兼容端点 |
+| `grok`       | xAI Grok              | |
+| `openrouter` | OpenRouter            | 一把 key 用上百个模型 |
+| `deepseek`   | DeepSeek              | |
+| `moonshot`   | 月之暗面 Kimi          | |
+| `qwen`       | 阿里 Qwen / DashScope | 走 OpenAI 兼容模式 |
+| `glm`        | 智谱 GLM              | |
+| `minimax`    | MiniMax               | |
+| `ark`        | 火山引擎 ARK / 豆包    | |
+| `ollama`     | 本地 Ollama           | `http://localhost:11434/v1` |
+
+其他任意 OpenAI 兼容端点（vLLM、LM Studio、LiteLLM、Together、Groq、Fireworks…）走上面的 Option A 即可。
+
+#### 兼容性矩阵 — 诚实标注
+
+Engram 走的是一套通用协议（OpenAI 兼容的 chat completions + tool calling），按规范绝大多数 provider 都该能直接跑。下表区分**已端到端实测**与**按协议应可跑通但暂未实际验证**。如果你跑出问题，欢迎开 issue 反馈。
+
+| Provider | Chat | 工具调用 | JSON 管线 | 状态 |
+|---|---|---|---|---|
+| DeepSeek          | ✅ | ✅ | ✅ | **已验证** |
+| ARK / 豆包         | ✅ | ✅ | ✅ | **已验证**（embedding 也走它） |
+| OpenAI            | ✅ | ✅ | ✅ | 协议兼容 — 暂未实测 |
+| Anthropic Claude  | ✅ | ✅ | ✅ 走 prompt 兜底 | 协议兼容 — 暂未实测 |
+| Google Gemini     | ✅ | ✅ | ✅ | 协议兼容 — 暂未实测 |
+| xAI Grok          | ✅ | ✅ | ✅ | 协议兼容 — 暂未实测 |
+| Moonshot Kimi     | ✅ | ✅ | ✅ | 协议兼容 — 暂未实测 |
+| 阿里 Qwen         | ✅ | ✅ | ✅ | 协议兼容 — 暂未实测 |
+| 智谱 GLM          | ✅ | ✅ | ✅ | 协议兼容 — 暂未实测 |
+| MiniMax           | ✅ | ✅ | ✅ | 协议兼容 — 暂未实测 |
+| OpenRouter        | ✅ | 取决于路由的模型 | 取决于路由 | 协议兼容 — 暂未实测 |
+| Ollama（本地）     | ✅ | 看模型（llama3.1+ / qwen2.5+ / gpt-oss） | ✅ | 协议兼容 — 暂未实测 |
+
+> **Embedding 提示**：Anthropic、DeepSeek、Moonshot 自己不提供 embedding 服务，需要搭配一个有 embedding 的 provider（OpenAI / GLM / Qwen / ARK / Ollama / Voyage / Jina），通过 `EMBED_BASE_URL` + `EMBED_API_KEY` + `EMBED_MODEL` 单独配置。
+
+### Embedding
+
+Embedding 同样走 OpenAI 兼容的 `/embeddings`，**自动回退到 `LLM_*`**——常见情况下只需要配置模型名：
+
+```env
+EMBED_MODEL=text-embedding-3-small
+# EMBED_BASE_URL / EMBED_API_KEY — 仅当 embedding 走和 chat 不一样的 provider 时才需要
+```
 
 ### 添加维度
 

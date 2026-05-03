@@ -214,17 +214,26 @@ In Docker, `data/` is bind-mounted from the host's `./data/cognitive/`, so conta
 
 ## Environment variables
 
+Universal OpenAI-compatible interface — three variables and you're done:
+
 ```bash
-STRUCTURED_LLM_PROVIDER=ark|moonshot|deepseek|minimax
-ARK_API_KEY=...
-DOUBAO_EMBED_MODEL=...        # Doubao embedding endpoint
-ARK_TEXT_MODEL=...
-MOONSHOT_API_KEY=...
-DEEPSEEK_API_KEY=...
-MINIMAX_TEXT_API_KEY=...
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=sk-...
+LLM_MODEL=gpt-4.1-mini
+EMBED_MODEL=text-embedding-3-small   # falls back to LLM_BASE_URL / LLM_API_KEY
 DB_PATH=./data/cognitive.db
 VECTOR_INDEX_PATH=./data/vectors
 ```
+
+Or pick a preset (no base_url to remember):
+
+```bash
+LLM_PROVIDER=openai|anthropic|gemini|grok|openrouter|deepseek|moonshot|qwen|glm|minimax|ark|ollama
+LLM_API_KEY=...
+# LLM_MODEL=...    # optional, override preset's default model
+```
+
+See the full provider matrix in the root [README.md](../README.md#configuration).
 
 ---
 

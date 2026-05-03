@@ -136,18 +136,20 @@ function ConfirmDialog({ opts, onClose }: { opts: ConfirmState; onClose: (ok: bo
 
         {/* Actions */}
         <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, padding: '20px 20px 20px' }}>
-          <button
-            onClick={() => onClose(false)}
-            style={{
-              padding: '8px 18px', borderRadius: 8, border: '1px solid var(--border2)',
-              background: 'transparent', color: 'var(--text2)', fontSize: 13, fontWeight: 500,
-              cursor: 'pointer', transition: 'all 0.12s',
-            }}
-            onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface2)')}
-            onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
-          >
-            {cancelLabel}
-          </button>
+          {cancelLabel && (
+            <button
+              onClick={() => onClose(false)}
+              style={{
+                padding: '8px 18px', borderRadius: 8, border: '1px solid var(--border2)',
+                background: 'transparent', color: 'var(--text2)', fontSize: 13, fontWeight: 500,
+                cursor: 'pointer', transition: 'all 0.12s',
+              }}
+              onMouseEnter={e => (e.currentTarget.style.background = 'var(--surface2)')}
+              onMouseLeave={e => (e.currentTarget.style.background = 'transparent')}
+            >
+              {cancelLabel}
+            </button>
+          )}
           <button
             onClick={() => onClose(true)}
             autoFocus

@@ -20,6 +20,15 @@ const DICTS: Record<Lang, Dict> = { zh, en }
 
 const STORAGE_KEY = 'engram_lang'
 
+// Module-level mirror of the active language. The LanguageProvider keeps it
+// in sync; non-component utilities (like fmtTime) read it via getActiveLang
+// so they stay in step with the current UI lang without taking it as a
+// parameter at every call site.
+let _activeLang: Lang = 'zh'
+export function getActiveLang(): Lang {
+  return _activeLang
+}
+
 function detectDefault(): Lang {
   if (typeof window === 'undefined') return 'zh'
   const saved = window.localStorage.getItem(STORAGE_KEY)
@@ -72,14 +81,20 @@ interface I18nContextValue {
 const Ctx = createContext<I18nContextValue | null>(null)
 
 export function LanguageProvider({ children }: { children: React.ReactNode }) {
-  const [lang, setLangState] = useState<Lang>(detectDefault)
+  const [lang, setLangState] = useState<Lang>(() => {
+    const initial = detectDefault()
+    _activeLang = initial
+    return initial
+  })
 
   const setLang = useCallback((l: Lang) => {
+    _activeLang = l
     setLangState(l)
     try { window.localStorage.setItem(STORAGE_KEY, l) } catch { /* ignore */ }
   }, [])
 
   useEffect(() => {
+    _activeLang = lang
     if (typeof document !== 'undefined') {
       document.documentElement.lang = lang
     }

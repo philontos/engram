@@ -214,17 +214,26 @@ Docker 部署时 `data/` 对应宿主机 `./data/cognitive/`（bind mount，容�
 
 ## 环境变量
 
+通用 OpenAI 兼容接入，三个变量搞定：
+
 ```bash
-STRUCTURED_LLM_PROVIDER=ark|moonshot|deepseek|minimax
-ARK_API_KEY=...
-DOUBAO_EMBED_MODEL=...        # 豆包 Embedding endpoint
-ARK_TEXT_MODEL=...
-MOONSHOT_API_KEY=...
-DEEPSEEK_API_KEY=...
-MINIMAX_TEXT_API_KEY=...
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=sk-...
+LLM_MODEL=gpt-4.1-mini
+EMBED_MODEL=text-embedding-3-small   # 默认沿用 LLM_BASE_URL / LLM_API_KEY
 DB_PATH=./data/cognitive.db
 VECTOR_INDEX_PATH=./data/vectors
 ```
+
+或用预设（无需记 base_url）：
+
+```bash
+LLM_PROVIDER=anthropic|openai|gemini|grok|openrouter|deepseek|moonshot|qwen|glm|minimax|ark|ollama
+LLM_API_KEY=...
+# LLM_MODEL=...    # 可选，覆盖预设默认模型
+```
+
+完整选项见根目录 [README.zh.md](../README.zh.md#配置) 的 Configuration 章节。
 
 ---
 

@@ -36,7 +36,7 @@ const dict = {
 
   nav: {
     graph:         '图谱',
-    entries:       '记忆',
+    entries:       '回响',
     profile:       '画像',
     query:         '洞察',
     admin:         '管理',
@@ -125,6 +125,8 @@ const dict = {
   },
 
   profile: {
+    title:                 '画像',
+    subtitle:              '从你的反思中累积的维度，而不是来自你的行动。',
     loading:               '加载中…',
     empty:                 '暂无画像数据，请先处理一些记忆',
     current:               '当前画像',
@@ -154,6 +156,13 @@ const dict = {
     revert:                '撤销',
     select_one:            '选择一条记忆查看详情',
     write_failed:          '写入失败: {error}',
+    process_running:           '处理中…',
+    process_done:              '完成 · {ms}ms',
+    process_failed:            '处理失败',
+    process_stage_slice:       '切片与画像',
+    process_stage_backbone:    '生长图谱',
+    process_slice_detail:      '{n} 个特征',
+    process_backbone_detail:   '+{nodes}节点 / +{edges}边',
     delete_title:          '删除 Entry #{id}',
     delete_message:        '将同时删除关联的切片和激活记录，无法恢复。',
     revert_title:          '撤销 Entry #{id}',
@@ -163,8 +172,10 @@ const dict = {
     revert_failed:         '撤销失败: {error}',
     nodes_edges:           '{nodes}节点 {edges}边',
     status_captured:       '待处理',
+    status_processing:     '处理中',
     status_processed:      '已处理',
-    status_slice_failed:   '处理失败',
+    status_slice_failed:   '切片失败',
+    status_failed:         '处理失败',
     status_reverted:       '已撤销',
     view_trace:            '查看 Trace',
     slice_analysis:        '切片分析',

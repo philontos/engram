@@ -1,19 +1,17 @@
 // ── Enum values ───────────────────────────────────────────────────────────────
 //
 // Domain values are NOT defined here — they come from the backend's
-// /ui/api/backbones endpoint via `useBackbones()`. Use `getDomainColor` /
-// `getDomainLabel` to resolve a backbone key against the live catalog.
+// /ui/api/backbones endpoint via `useBackbones()`. Use `getDomainLabel`
+// to render the human label, and `useDomainColor()` from `lib/theme.ts`
+// to resolve a theme-aware Morandi color.
 //
 // Node-type and relation-type are first-class graph enums shared across
 // backbones, so they stay defined here.
 
 import type { BackboneSchema } from '@/api'
 
-const FALLBACK_COLOR = '#64748b'
-
-export function getDomainColor(key: string, backbones: BackboneSchema[]): string {
-  return backbones.find(b => b.key === key)?.color ?? FALLBACK_COLOR
-}
+// Domain color resolution moved to `lib/theme.ts` (theme-aware, frontend-owned).
+// Import `useDomainColor` (hook) or `domainColor` (pure fn) from there.
 
 export function getDomainLabel(key: string, backbones: BackboneSchema[], lang: 'zh' | 'en'): string {
   const bb = backbones.find(b => b.key === key)
@@ -42,12 +40,15 @@ export const TYPE_SHAPES: Record<string, string> = {
   method:  'hexagon',
 }
 
+// Morandi-aligned. Cytoscape stylesheet consumes these as literal hex (CSS
+// vars don't resolve in cytoscape), so values are picked to render readably
+// on both light and dark canvases.
 export const RELATION_COLORS: Record<string, string> = {
-  similar:  '#94a3b8',
-  supports: '#818cf8',
-  opposes:  '#f87171',
-  derives:  '#34d399',
-  related:  '#64748b',
+  similar:  '#9AA8B5',  // slate
+  supports: '#D0A892',  // clay
+  opposes:  '#C0816A',  // rust
+  derives:  '#A3B89F',  // sage
+  related:  '#75716B',  // muted neutral
 }
 
 const TYPE_LABELS_EN: Record<string, string> = {
@@ -90,49 +91,15 @@ export function getRelationLabel(key: string, lang: 'zh' | 'en'): string {
   return map[key] ?? key
 }
 
-// ── Profile dimension display names ───────────────────────────────────────────
+// ── Dimension display name maps ──────────────────────────────────────────
+// Backbone schemas now carry their own labels; OCEAN / Schwartz name tables
+// were removed as dead code. Re-add them only when a consumer actually
+// needs static mappings (and prefer i18n keys when possible).
 
-export const OCEAN_NAMES_ZH: Record<string, string> = {
-  O: '开放性', C: '尽责性', E: '外向性', A: '宜人性', N: '神经质',
-}
-
-export const OCEAN_NAMES_EN: Record<string, string> = {
-  O: 'Openness', C: 'Conscientiousness', E: 'Extraversion', A: 'Agreeableness', N: 'Neuroticism',
-}
-
-export const SCHWARTZ_NAMES_ZH: Record<string, string> = {
-  achievement:    '成就',
-  power:          '权力',
-  hedonism:       '享乐',
-  stimulation:    '刺激',
-  self_direction: '自我导向',
-  universalism:   '普世主义',
-  benevolence:    '仁慈',
-  tradition:      '传统',
-  conformity:     '顺从',
-  security:       '安全',
-}
-
-export const SCHWARTZ_NAMES_EN: Record<string, string> = {
-  achievement:    'Achievement',
-  power:          'Power',
-  hedonism:       'Hedonism',
-  stimulation:    'Stimulation',
-  self_direction: 'Self-Direction',
-  universalism:   'Universalism',
-  benevolence:    'Benevolence',
-  tradition:      'Tradition',
-  conformity:     'Conformity',
-  security:       'Security',
-}
-
-// Backwards-compatibility re-exports (some files still import these names).
-// Components migrating to i18n should pick the right map via lang.
-export const OCEAN_NAMES = OCEAN_NAMES_ZH
-export const SCHWARTZ_NAMES = SCHWARTZ_NAMES_ZH
-
+// Morandi 10-color cycle. ProfileTab uses theme-aware vizCycle() instead;
+// these values are kept for any non-themed consumer.
 export const SCHWARTZ_COLORS = [
-  '#6366f1','#8b5cf6','#a855f7','#ec4899',
-  '#f43f5e','#f59e0b','#10b981','#3b82f6',
-  '#06b6d4','#84cc16',
+  '#9E8B8E','#8FA28E','#B89481','#7B8794',
+  '#A36F5C','#B5A064','#8E7585','#9AA8B5',
+  '#A3B89F','#D0A892',
 ]

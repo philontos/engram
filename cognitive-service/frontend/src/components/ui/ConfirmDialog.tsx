@@ -111,12 +111,12 @@ function ConfirmDialog({ opts, onClose }: { opts: ConfirmState; onClose: (ok: bo
           {danger && (
             <div style={{
               width: 36, height: 36, borderRadius: 10, flexShrink: 0,
-              background: 'rgba(248,113,113,0.12)',
+              background: 'var(--engram-tint-warning)',
               display: 'flex', alignItems: 'center', justifyContent: 'center',
             }}>
               {destructive
-                ? <Trash2 size={17} color="#f87171" />
-                : <AlertTriangle size={17} color="#f87171" />
+                ? <Trash2 size={17} color="var(--engram-accent-warning)" />
+                : <AlertTriangle size={17} color="var(--engram-accent-warning)" />
               }
             </div>
           )}
@@ -155,8 +155,8 @@ function ConfirmDialog({ opts, onClose }: { opts: ConfirmState; onClose: (ok: bo
             autoFocus
             style={{
               padding: '8px 18px', borderRadius: 8, border: 'none',
-              background: danger ? '#ef4444' : 'var(--accent)',
-              color: '#fff', fontSize: 13, fontWeight: 600,
+              background: danger ? 'var(--engram-accent-warning)' : 'var(--accent)',
+              color: 'var(--engram-bg-canvas)', fontSize: 13, fontWeight: 600,
               cursor: 'pointer', transition: 'opacity 0.12s',
             }}
             onMouseEnter={e => (e.currentTarget.style.opacity = '0.88')}

@@ -14,6 +14,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
+from app.lib import process_events
 from app.lib.db import get_conn
 from app.lib.embed import embed
 from app.lib.intent_gate import classify
@@ -107,5 +108,6 @@ async def capture(req: CaptureRequest):
 
     metadata = _build_metadata(req)
     entry_id = await _create_entry(content, req, metadata=metadata)
+    process_events.init(entry_id)
     asyncio.create_task(_trigger_process(entry_id))
     return CaptureResponse(track="entry", id=entry_id, reason=reason)

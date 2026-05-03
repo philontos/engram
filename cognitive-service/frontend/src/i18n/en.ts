@@ -33,7 +33,7 @@ const dict: Dict = {
 
   nav: {
     graph:         'Graph',
-    entries:       'Memory',
+    entries:       'Reflections',
     profile:       'Profile',
     query:         'Insight',
     admin:         'Admin',
@@ -122,6 +122,8 @@ const dict: Dict = {
   },
 
   profile: {
+    title:                 'Profile',
+    subtitle:              'Dimensions accumulated from your reflections, not from your activity.',
     loading:               'Loading…',
     empty:                 'No profile data yet — process some entries first',
     current:               'Current profile',
@@ -151,6 +153,13 @@ const dict: Dict = {
     revert:                'Revert',
     select_one:            'Select an entry to see details',
     write_failed:          'Save failed: {error}',
+    process_running:           'Processing…',
+    process_done:              'Done · {ms}ms',
+    process_failed:            'Failed',
+    process_stage_slice:       'Slice & profile',
+    process_stage_backbone:    'Grow graph',
+    process_slice_detail:      '{n} features',
+    process_backbone_detail:   '+{nodes}n / +{edges}e',
     delete_title:          'Delete Entry #{id}',
     delete_message:        'Will also remove the linked slice and activation records. Cannot be undone.',
     revert_title:          'Revert Entry #{id}',
@@ -160,8 +169,10 @@ const dict: Dict = {
     revert_failed:         'Revert failed: {error}',
     nodes_edges:           '{nodes} nodes, {edges} edges',
     status_captured:       'pending',
+    status_processing:     'processing',
     status_processed:      'processed',
-    status_slice_failed:   'failed',
+    status_slice_failed:   'slice failed',
+    status_failed:         'failed',
     status_reverted:       'reverted',
     view_trace:            'View trace',
     slice_analysis:        'Slice analysis',

@@ -25,6 +25,17 @@ async def startup():
             ", ".join(orphans),
         )
 
+    # Crash recovery: any entry left in 'processing' from a previous run had
+    # its pipeline interrupted (process killed, OOM, container restart). Roll
+    # them back to 'captured' so process_pending picks them up again.
+    from app.lib.db import get_conn
+    with get_conn() as conn:
+        cur = conn.execute(
+            "UPDATE entries SET processing_status='captured' WHERE processing_status='processing'"
+        )
+        if cur.rowcount:
+            logger.warning("Reset %d stuck 'processing' entries to 'captured' on startup", cur.rowcount)
+
 
 app.include_router(capture.router)
 app.include_router(import_entries.router)

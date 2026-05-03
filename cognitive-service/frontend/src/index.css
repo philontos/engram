@@ -1,20 +1,27 @@
 @import "tailwindcss";
+@import "./styles/tokens.css";
 
+/*
+ * Legacy aliases — components written before the Morandi migration use these.
+ * They now point at --engram-* semantic tokens so the whole app inherits the
+ * theme + theme-toggle without per-component refactor. Replace usages with
+ * --engram-* directly when you touch a component for other reasons.
+ */
 :root {
-  --bg:       #0d0f17;
-  --surface:  #13161f;
-  --surface2: #1c2032;
-  --surface3: #242840;
-  --border:   #252a3d;
-  --border2:  #2e3450;
-  --text:     #e2e8f0;
-  --text2:    #8892a4;
-  --text3:    #4f5a6e;
-  --accent:   #6366f1;
-  --accent2:  #818cf8;
-  --green:    #10b981;
-  --red:      #f87171;
-  --yellow:   #f59e0b;
+  --bg:       var(--engram-bg-canvas);
+  --surface:  var(--engram-bg-surface);
+  --surface2: var(--engram-bg-elevated);
+  --surface3: var(--engram-bg-elevated);
+  --border:   var(--engram-border-subtle);
+  --border2:  var(--engram-border-subtle);
+  --text:     var(--engram-text-primary);
+  --text2:    var(--engram-text-secondary);
+  --text3:    var(--engram-text-muted);
+  --accent:   var(--engram-accent-primary);
+  --accent2:  var(--engram-accent-highlight);
+  --green:    var(--engram-accent-success);
+  --red:      var(--engram-accent-warning);
+  --yellow:   var(--engram-accent-strength);
 }
 
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
@@ -77,8 +84,8 @@ body {
   font-size: 12px; font-weight: 500; cursor: pointer;
   transition: all 0.12s; border: none; outline: none;
 }
-.btn-primary { background: var(--accent); color: #fff; }
-.btn-primary:hover { background: #7577f3; }
+.btn-primary { background: var(--accent); color: var(--engram-bg-canvas); }
+.btn-primary:hover { background: var(--engram-accent-highlight); }
 .btn-primary:disabled { opacity: 0.45; cursor: default; }
 .btn-ghost {
   background: transparent; color: var(--text2);
@@ -109,9 +116,9 @@ body {
   transition: background 0.1s;
   border-bottom: 1px solid var(--border);
 }
-.list-item:hover { background: rgba(255,255,255,0.03); }
+.list-item:hover { background: var(--engram-bg-elevated); }
 .list-item.active {
-  background: rgba(99,102,241,0.1);
+  background: var(--engram-tint-primary);
   border-left: 2px solid var(--accent) !important;
 }
 
@@ -146,6 +153,6 @@ body {
 @keyframes fadeIn { from { opacity:0; transform:translateY(4px) } to { opacity:1; transform:translateY(0) } }
 .fade-in { animation: fadeIn 0.15s ease-out; }
 
-.log-item:hover { background: rgba(99,102,241,0.05) !important; }
+.log-item:hover { background: var(--engram-tint-primary) !important; }
 .log-item:hover .log-delete-btn { opacity: 1 !important; }
-.log-delete-btn:hover { color: var(--red) !important; background: rgba(248,113,113,0.1) !important; }
+.log-delete-btn:hover { color: var(--red) !important; background: var(--engram-tint-warning) !important; }

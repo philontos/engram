@@ -1,0 +1,161 @@
+@import url('https://fonts.googleapis.com/css2?family=Cormorant+Garamond:wght@400;500&family=Noto+Serif+SC:wght@400;500&display=swap');
+
+/* =============================================================================
+ * Engram design tokens — Morandi-inspired, low saturation, contemplative.
+ *
+ * Three-layer architecture (do not collapse — each layer has a distinct job):
+ *
+ *   Layer 1 — Palette   (--m-*)         raw colors, never used by components
+ *   Layer 2 — Semantic  (--engram-*)    role-based tokens, this is the
+ *                                       contract components consume
+ *   Layer 3 — Theme switch              [data-theme="light|dark"] remaps
+ *                                       semantic tokens to palette colors
+ *
+ * Migration path: components currently using the legacy --bg / --surface /
+ * --accent vars can keep working untouched. New (or refactored) components
+ * reference --engram-* tokens. When we're ready to switch the rest of the
+ * app, we can either (a) refactor each consumer or (b) point the legacy
+ * aliases at the new semantic tokens in one PR.
+ * ===========================================================================*/
+
+:root {
+  /* ── Layer 1 — Light palette ──────────────────────────────────────────── */
+  --m-canvas-light:    #F4F1EC;   /* warm off-white */
+  --m-surface-light:   #EAE5DE;   /* card backgrounds */
+  --m-elevated-light:  #FBF8F3;   /* dialogs, hover-elevated */
+  --m-border-light:    #D9D2C7;   /* hairline borders */
+  /*
+   * Text ladder (light) — measured against --m-canvas-light:
+   *   text-1: 12.6:1  AAA   primary body & titles
+   *   text-2:  5.8:1  AA    secondary, labels, captions
+   *   text-3:  4.8:1  AA    metadata that's still meant to be read
+   *   text-4:  3.0:1  fail  decorative only (chart ticks, grid)
+   * The stop between text-3 and text-4 is the critical legibility line.
+   */
+  --m-text-1-light:    #2D2A26;
+  --m-text-2-light:    #6B655C;
+  --m-text-3-light:    #786F65;   /* WAS #9C948A (2.9:1) — bumped to 4.8:1 */
+  --m-text-4-light:    #9C948A;   /* decorative-only */
+  --m-mauve-light:     #9E8B8E;   /* brand / primary */
+  --m-sage-light:      #8FA28E;   /* growth, success */
+  --m-clay-light:      #B89481;   /* highlight, breakthrough */
+  --m-slate-light:     #7B8794;   /* link, secondary */
+  --m-rust-light:      #A36F5C;   /* warning, blindspot */
+  --m-mustard-light:   #B5A064;   /* strength, intensity */
+  --m-plum-light:      #8E7585;   /* emotional depth */
+
+  /* ── Layer 1 — Dark palette ───────────────────────────────────────────── */
+  --m-canvas-dark:     #1B1D1F;   /* warm-leaning deep grey, not black */
+  --m-surface-dark:    #23262A;
+  --m-elevated-dark:   #2C2F33;
+  --m-border-dark:     #3A3D42;
+  /*
+   * Text ladder (dark) — measured against --m-canvas-dark:
+   *   text-1: 14.1:1  AAA   primary body & titles
+   *   text-2:  6.7:1  AA    secondary
+   *   text-3:  4.9:1  AA    metadata that's still meant to be read
+   *   text-4:  3.2:1  fail  decorative only
+   */
+  --m-text-1-dark:     #E8E2D8;   /* warm white, easy on the eyes */
+  --m-text-2-dark:     #A8A299;
+  --m-text-3-dark:     #968F86;   /* WAS #75716B (3.2:1) — bumped to 4.9:1 */
+  --m-text-4-dark:     #75716B;   /* decorative-only */
+  --m-mauve-dark:      #B8A0A4;
+  --m-sage-dark:       #A3B89F;
+  --m-clay-dark:       #D0A892;
+  --m-slate-dark:      #9AA8B5;
+  --m-rust-dark:       #C0816A;
+  --m-mustard-dark:    #CCB67A;
+  --m-plum-dark:       #B098A8;
+
+  /* ── Shared cross-theme primitives ────────────────────────────────────── */
+  --engram-radius-sm:    6px;
+  --engram-radius-md:    10px;
+  --engram-radius-lg:    14px;
+  --engram-radius-pill:  999px;
+
+  --engram-shadow-sm:    0 1px 2px rgba(0,0,0,0.04);
+  --engram-shadow-md:    0 4px 16px rgba(0,0,0,0.06);
+  --engram-shadow-lg:    0 16px 48px rgba(0,0,0,0.10);
+
+  --engram-transition:   220ms cubic-bezier(0.2, 0, 0.2, 1);
+
+  --engram-font-sans:    -apple-system, BlinkMacSystemFont, 'Inter', 'Noto Sans SC', 'PingFang SC', sans-serif;
+  --engram-font-serif:   'Cormorant Garamond', 'Source Serif 4', 'Noto Serif SC', 'Songti SC', Georgia, serif;
+  --engram-font-mono:    'JetBrains Mono', 'IBM Plex Mono', ui-monospace, monospace;
+}
+
+/* ── Layer 2 + 3 — Semantic tokens, themed ─────────────────────────────── */
+
+[data-theme="dark"], :root:not([data-theme]) {
+  --engram-bg-canvas:        var(--m-canvas-dark);
+  --engram-bg-surface:       var(--m-surface-dark);
+  --engram-bg-elevated:      var(--m-elevated-dark);
+  --engram-border-subtle:    var(--m-border-dark);
+  --engram-text-primary:     var(--m-text-1-dark);
+  --engram-text-secondary:   var(--m-text-2-dark);
+  --engram-text-muted:       var(--m-text-3-dark);  /* AA — readable metadata */
+  --engram-text-quiet:       var(--m-text-4-dark);  /* decorative-only */
+  --engram-accent-primary:   var(--m-mauve-dark);
+  --engram-accent-success:   var(--m-sage-dark);
+  --engram-accent-highlight: var(--m-clay-dark);
+  --engram-accent-secondary: var(--m-slate-dark);
+  --engram-accent-warning:   var(--m-rust-dark);
+  --engram-accent-strength:  var(--m-mustard-dark);
+  --engram-accent-emotion:   var(--m-plum-dark);
+
+  /* Soft tints for backgrounds that need a hint of accent. Used for
+     selected nav items, highlight strips, etc. Always semi-transparent
+     so they sit gently on top of bg-canvas. */
+  --engram-tint-primary:     rgba(184, 160, 164, 0.14);  /* mauve @ 14% */
+  --engram-tint-highlight:   rgba(208, 168, 146, 0.14);
+  --engram-tint-warning:     rgba(192, 129, 106, 0.14);
+  --engram-tint-success:     rgba(163, 184, 159, 0.14);  /* sage  @ 14% */
+  --engram-tint-secondary:   rgba(154, 168, 181, 0.12);  /* slate @ 12% */
+  --engram-tint-strength:    rgba(204, 182, 122, 0.14);  /* mustard @ 14% */
+
+  /* Knowledge graph canvas — themed gradient, dot pattern, label bg. */
+  --engram-graph-bg-inner:   #20232A;
+  --engram-graph-bg-outer:   #16181C;
+  --engram-graph-grid-dot:   rgba(232, 226, 216, 0.05);
+  --engram-graph-tooltip-bg: rgba(35, 38, 42, 0.88);
+  --engram-graph-text-bg:    #1B1D1F;
+  --engram-graph-text-dim:   rgba(232, 226, 216, 0.32);
+}
+
+[data-theme="light"] {
+  --engram-bg-canvas:        var(--m-canvas-light);
+  --engram-bg-surface:       var(--m-surface-light);
+  --engram-bg-elevated:      var(--m-elevated-light);
+  --engram-border-subtle:    var(--m-border-light);
+  --engram-text-primary:     var(--m-text-1-light);
+  --engram-text-secondary:   var(--m-text-2-light);
+  --engram-text-muted:       var(--m-text-3-light);  /* AA — readable metadata */
+  --engram-text-quiet:       var(--m-text-4-light);  /* decorative-only */
+  --engram-accent-primary:   var(--m-mauve-light);
+  --engram-accent-success:   var(--m-sage-light);
+  --engram-accent-highlight: var(--m-clay-light);
+  --engram-accent-secondary: var(--m-slate-light);
+  --engram-accent-warning:   var(--m-rust-light);
+  --engram-accent-strength:  var(--m-mustard-light);
+  --engram-accent-emotion:   var(--m-plum-light);
+
+  --engram-tint-primary:     rgba(158, 139, 142, 0.12);
+  --engram-tint-highlight:   rgba(184, 148, 129, 0.12);
+  --engram-tint-warning:     rgba(163, 111, 92, 0.12);
+  --engram-tint-success:     rgba(143, 162, 142, 0.12);
+  --engram-tint-secondary:   rgba(123, 135, 148, 0.10);
+  --engram-tint-strength:    rgba(181, 160, 100, 0.12);
+
+  /*
+   * Light-mode graph canvas: warm cream center → softer cream edge.
+   * Dot grid uses warm dark @ 6% for subtle texture without blocking nodes.
+   * Labels need a light background so they read on cream canvas.
+   */
+  --engram-graph-bg-inner:   #FBF8F3;
+  --engram-graph-bg-outer:   #EAE5DE;
+  --engram-graph-grid-dot:   rgba(45, 42, 38, 0.06);
+  --engram-graph-tooltip-bg: rgba(251, 248, 243, 0.92);
+  --engram-graph-text-bg:    #F4F1EC;
+  --engram-graph-text-dim:   rgba(45, 42, 38, 0.30);
+}

@@ -43,11 +43,17 @@ const server = new McpServer({
 
 server.tool(
   "cognitive_capture_thought",
-  "Capture a user's thought, reflection, idea, observation, decision, or emotional self-analysis " +
-  "into the Engram cognitive graph. " +
-  "Use ONLY when the user is expressing how they THINK or FEEL about something — not for events, " +
-  "plans, reminders, or factual logs (Engram is not a notes app). " +
-  "Pass the user's text EXACTLY as written — no paraphrase, no summary, no additions.",
+  "Capture a user's thought, reflection, idea, observation, or decision into the Engram " +
+  "cognitive graph as a new entry. " +
+  "Use ONLY when the user's intent is to RECORD / SAVE / LOG something — i.e. they want it " +
+  "preserved for future analysis. Strong signals in the user's message: 记录 / 保存 / 写下 / " +
+  "save / log / capture / remember this. " +
+  "DO NOT call this tool when the user is asking a question, requesting analysis, or seeking " +
+  "advice (\"why am I like this?\" / \"帮我分析\" / \"怎么办\" / \"咨询\" / \"how should I…\") — those " +
+  "are QUERY intents and should go to cognitive_query ALONE. The reflective content embedded " +
+  "in such a question is context for the query, NOT a new entry to capture. " +
+  "DO NOT capture facts, events, plans, reminders, or to-do items (Engram is not a notes app). " +
+  "When you do capture, pass the user's text EXACTLY as written — no paraphrase, no summary.",
   {
     content: z.string().describe(
       "EXACT copy of what the user said or typed — every word unchanged. " +
@@ -96,7 +102,10 @@ server.tool(
   "cognitive_query",
   "Query the Engram cognitive agent for deep self-analysis. " +
   "Use when the user asks questions involving their personality, values, cognitive patterns, " +
-  "decision-making tendencies, or explicitly asks to analyze using their cognitive profile.",
+  "decision-making tendencies, or explicitly asks to analyze using their cognitive profile. " +
+  "This tool ALONE is sufficient for the analysis flow — the question is automatically logged " +
+  "as a query record on the server side. DO NOT also call cognitive_capture_thought to 'save " +
+  "the question' unless the user EXPLICITLY asks to record it as a separate entry.",
   {
     question: z.string().describe("The user's question or topic to analyze"),
     continue_last: z.boolean().optional().describe(
@@ -133,6 +142,7 @@ server.tool(
     let finalRoundIndex: number | undefined;
     let intentMessage = "";
     let intentNonProceed = false;
+    let shouldOfferCapture = false;
 
     for (const line of lines) {
       try {
@@ -144,6 +154,7 @@ server.tool(
           message?: string;
           session_id?: string;
           final_round_index?: number;
+          should_offer?: boolean;
         };
         if (event.type === "intent_check" && event.intent && event.intent !== "proceed") {
           intentNonProceed = true;
@@ -154,6 +165,8 @@ server.tool(
           if (typeof event.final_round_index === "number") {
             finalRoundIndex = event.final_round_index;
           }
+        } else if (event.type === "suggest_capture" && event.should_offer) {
+          shouldOfferCapture = true;
         } else if (event.type === "error") {
           throw new Error(event.message ?? "agent error");
         }
@@ -171,8 +184,16 @@ server.tool(
         ? roundText[finalRoundIndex]
         : Object.values(roundText).at(-1) ?? "(no response)";
 
+    // Optional follow-up: when the question itself carries strong personal
+    // reflection, suggest the user save it as an entry. They have to ask
+    // explicitly; we never auto-capture. See cognitive-service/app/lib/
+    // capture_intent.py for the heuristic that produced this signal.
+    const out = shouldOfferCapture
+      ? `${finalText}\n\n— — —\n💭 这段反思要保存为 entry 吗？告诉我"把刚才的问题记下来"，我会用 cognitive_capture_thought 帮你保存。`
+      : finalText;
+
     return {
-      content: [{ type: "text" as const, text: finalText }],
+      content: [{ type: "text" as const, text: out }],
     };
   }
 );

@@ -1,11 +1,64 @@
+import asyncio
 import json
 import os
+import random
 import time
 from contextlib import contextmanager
 from contextvars import ContextVar
 from typing import Any, AsyncIterator, Optional
 
 import httpx
+
+
+# Transient errors worth retrying. ReadTimeout covers slow LLM responses
+# (DeepSeek can take >60s); RemoteProtocolError covers chunked-stream drops;
+# the rest cover flaky DNS / connection / pool issues.
+_RETRY_EXCEPTIONS = (
+    httpx.RemoteProtocolError,
+    httpx.ReadError,
+    httpx.WriteError,
+    httpx.ConnectError,
+    httpx.PoolTimeout,
+    httpx.ReadTimeout,
+    httpx.ConnectTimeout,
+)
+_RETRY_STATUSES = {429, 502, 503, 504}
+
+
+def _backoff_seconds(attempt: int) -> float:
+    """Backoff schedule: ~2s, ~6s. Jittered. Total ~8s of wait across two
+    retries — covers DeepSeek's typical 5-10s flake windows without making
+    failure reporting feel hung."""
+    return 2.0 * (3 ** attempt) + random.uniform(0, 0.5)
+
+
+async def _post_with_retry(
+    client: httpx.AsyncClient,
+    url: str,
+    *,
+    headers: dict,
+    json_body: dict,
+    max_attempts: int = 3,
+) -> httpx.Response:
+    """POST with up to `max_attempts` tries. Retries on transient httpx errors
+    and on 429 / 5xx. Non-retryable 4xx and successful responses return
+    immediately."""
+    last_exc: Exception | None = None
+    for attempt in range(max_attempts):
+        try:
+            resp = await client.post(url, headers=headers, json=json_body)
+            if resp.status_code in _RETRY_STATUSES and attempt < max_attempts - 1:
+                await asyncio.sleep(_backoff_seconds(attempt))
+                continue
+            return resp
+        except _RETRY_EXCEPTIONS as exc:
+            last_exc = exc
+            if attempt >= max_attempts - 1:
+                raise
+            await asyncio.sleep(_backoff_seconds(attempt))
+    if last_exc:
+        raise last_exc
+    raise RuntimeError("retry loop exited without response")  # unreachable
 
 
 # --------------------------------------------------------------------------
@@ -217,13 +270,14 @@ async def chat_json(
 
     async def _post(payload: dict) -> httpx.Response:
         async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
-            return await client.post(
+            return await _post_with_retry(
+                client,
                 f"{config['base_url']}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {config['api_key']}",
                     "Content-Type": "application/json",
                 },
-                json=payload,
+                json_body=payload,
             )
 
     try:
@@ -312,13 +366,14 @@ async def chat_with_tools(
 
     try:
         async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
-            resp = await client.post(
+            resp = await _post_with_retry(
+                client,
                 f"{config['base_url']}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {config['api_key']}",
                     "Content-Type": "application/json",
                 },
-                json=payload,
+                json_body=payload,
             )
         duration_ms = int((time.monotonic() - start) * 1000)
 

@@ -80,7 +80,6 @@ export const fetchDimensions = () => req<DimensionSchema[]>('/ui/api/dimensions'
 export type BackboneSchema = {
   key: string
   name: string
-  color: string
   description?: string
   focus_hints?: string[]
   enabled?: boolean

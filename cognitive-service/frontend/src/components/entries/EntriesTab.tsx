@@ -3,7 +3,8 @@ import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchEntries, fetchEntry, fetchEntryTrace, deleteEntry, revertEntry, exportEntryTrace, exportAllTraces } from '@/api'
 import type { EntryDetail, TraceData, SliceFeature, SituationContext } from '@/types'
-import { SCHWARTZ_COLORS, getDomainColor, getDomainLabel } from '@/lib/constants'
+import { SCHWARTZ_COLORS, getDomainLabel } from '@/lib/constants'
+import { useDomainColor } from '@/lib/theme'
 import { useDimensionSchemas, getDimSchema } from '@/lib/useDimensionSchemas'
 import { useBackbones } from '@/lib/useBackbones'
 import { useI18n } from '@/i18n'
@@ -12,7 +13,15 @@ import { fmtTime } from '@/lib/utils'
 import { RefreshCw, Search, Trash2, ChevronRight, RotateCcw } from 'lucide-react'
 import { useConfirm } from '@/components/ui/ConfirmDialog'
 
+type ProcessEvent = {
+  type: string; stage?: string; status?: string; elapsed_ms?: number;
+  feature_count?: number; profile_changed_subdims?: number;
+  activated?: string[]; nodes_upserted?: number; edges_upserted?: number;
+  final_status?: string; duration_ms?: number; message?: string;
+}
+
 export function EntriesTab() {
+  const colorOf = useDomainColor()
   const qc = useQueryClient()
   const { backbones } = useBackbones()
   const { lang, t } = useI18n()
@@ -20,6 +29,11 @@ export function EntriesTab() {
   const [traceId, setTraceId]          = useState<number | null>(null)
   const [captureText, setCaptureText]  = useState('')
   const [capturing, setCapturing]      = useState(false)
+  const [rejectHint, setRejectHint]    = useState<string>('')
+  const [processEntryId, setProcessEntryId] = useState<number | null>(null)
+  const [processEvents, setProcessEvents]   = useState<ProcessEvent[]>([])
+  const [processDone, setProcessDone]       = useState(false)
+  const processAbortRef = useRef<AbortController | null>(null)
   const [revertingIds, setRevertingIds] = useState<Set<number>>(new Set())
   const confirm     = useConfirm()
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -50,20 +64,62 @@ export function EntriesTab() {
   async function handleCapture() {
     const text = captureText.trim(); if (!text || capturing) return
     setCapturing(true)
+    setRejectHint('')
     try {
       const res = await fetch('/capture', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ content: text, source: 'web' }) })
       if (!res.ok) throw new Error(await res.text())
-      const data = await res.json() as { track: 'entry' | 'reject'; reason?: string }
+      const data = await res.json() as { track: 'entry' | 'reject'; id?: number | null; reason?: string }
       if (data.track === 'reject') {
-        alert(data.reason || t('entries.write_failed', { error: 'rejected' }))
+        setRejectHint(data.reason || t('entries.write_failed', { error: 'rejected' }))
         return
       }
       setCaptureText('')
       await qc.invalidateQueries({ queryKey: ['entries'] })
       await qc.invalidateQueries({ queryKey: ['stats'] })
+      if (data.id != null) startProcessStream(data.id)
     } catch (err) { alert(t('entries.write_failed', { error: String(err) })) }
     finally { setCapturing(false) }
   }
+
+  async function startProcessStream(entryId: number) {
+    processAbortRef.current?.abort()
+    const ac = new AbortController()
+    processAbortRef.current = ac
+    setProcessEntryId(entryId); setProcessEvents([]); setProcessDone(false)
+    try {
+      const res = await fetch(`/entries/${entryId}/process/stream`, { signal: ac.signal })
+      if (!res.ok || !res.body) return
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buf = ''
+      for (;;) {
+        const { value, done } = await reader.read()
+        if (done) break
+        buf += decoder.decode(value, { stream: true })
+        let nl: number
+        while ((nl = buf.indexOf('\n')) >= 0) {
+          const line = buf.slice(0, nl).trim(); buf = buf.slice(nl + 1)
+          if (!line) continue
+          let ev: ProcessEvent
+          try { ev = JSON.parse(line) as ProcessEvent } catch { continue }
+          if (ev.type === 'ping') continue
+          setProcessEvents(prev => [...prev, ev])
+          if (ev.type === 'stage' && ev.stage === 'pipeline' && (ev.status === 'done' || ev.status === 'error')) {
+            setProcessDone(true)
+            void qc.invalidateQueries({ queryKey: ['entries'] })
+            void qc.invalidateQueries({ queryKey: ['stats'] })
+            void qc.invalidateQueries({ queryKey: ['graph'] })
+          }
+        }
+      }
+    } catch { /* abort or network — silent */ }
+  }
+
+  useEffect(() => {
+    if (!processDone || processEntryId === null) return
+    const t = window.setTimeout(() => { setProcessEntryId(null); setProcessEvents([]); setProcessDone(false) }, 4000)
+    return () => window.clearTimeout(t)
+  }, [processDone, processEntryId])
 
 
   async function handleDelete(id: number, e: React.MouseEvent) {
@@ -111,21 +167,33 @@ export function EntriesTab() {
 
       {/* ── Left list ── */}
       <div style={{
-        width: 300, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden',
+        width: 420, flexShrink: 0, display: 'flex', flexDirection: 'column', overflow: 'hidden',
         background: 'var(--surface)', borderRight: '1px solid var(--border)',
       }}>
         {/* Capture */}
         <div style={{ padding: '14px 14px 12px', borderBottom: '1px solid var(--border)' }}>
           <textarea
             ref={textareaRef} rows={3} value={captureText}
-            onChange={e => setCaptureText(e.target.value)}
+            onChange={e => { setCaptureText(e.target.value); if (rejectHint) setRejectHint('') }}
             placeholder={t('entries.write_placeholder')}
             className="input"
             style={{ resize: 'none', marginBottom: 8, lineHeight: 1.6, fontSize: 12 }}
           />
+          {rejectHint && (
+            <div style={{
+              marginBottom: 8, padding: '8px 10px', fontSize: 11, lineHeight: 1.55,
+              color: 'var(--text-muted, #888)', background: 'var(--surface-muted, rgba(0,0,0,0.04))',
+              border: '1px solid var(--border)', borderRadius: 6,
+            }}>
+              {rejectHint}
+            </div>
+          )}
           <button onClick={handleCapture} disabled={capturing || !captureText.trim()} className="btn btn-primary" style={{ width: '100%', fontSize: 12 }}>
             {capturing ? t('entries.storing') : t('entries.store')}
           </button>
+          {processEntryId !== null && (
+            <ProcessPanel entryId={processEntryId} events={processEvents} done={processDone} />
+          )}
         </div>
 
         {/* Header */}
@@ -147,7 +215,7 @@ export function EntriesTab() {
                   <div key={e.id} onClick={() => setSelectedId(e.id)}
                     style={{
                       padding: '12px 16px', cursor: 'pointer', borderBottom: '1px solid var(--border)',
-                      background: isSelected ? 'rgba(99,102,241,0.1)' : 'transparent',
+                      background: isSelected ? 'var(--engram-tint-primary)' : 'transparent',
                       borderLeft: isSelected ? '2px solid var(--accent)' : '2px solid transparent',
                       transition: 'background 0.1s',
                     }}>
@@ -158,14 +226,14 @@ export function EntriesTab() {
                       <StatusBadge status={e.processing_status} />
                       <span style={{ fontSize: 10, color: 'var(--text3)' }}>{fmtTime(e.created_at)}</span>
                       {e.domains.map(d => {
-                        const c = getDomainColor(d, backbones)
+                        const c = colorOf(d, backbones)
                         return <span key={d} className="chip" style={{ background: c + '22', color: c }}>{getDomainLabel(d, backbones, lang)}</span>
                       })}
                     </div>
                     <div style={{ display: 'flex', gap: 6, marginTop: 8 }} onClick={ev => ev.stopPropagation()}>
                       {e.processing_status === 'processed' && (
                         <button onClick={ev => { ev.stopPropagation(); setTraceId(e.id) }}
-                          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 6, border: '1px solid rgba(99,102,241,0.3)', cursor: 'pointer', background: 'rgba(99,102,241,0.08)', color: 'var(--accent2)', fontSize: 11 }}>
+                          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 6, border: '1px solid var(--engram-accent-primary)', cursor: 'pointer', background: 'var(--engram-tint-primary)', color: 'var(--accent2)', fontSize: 11 }}>
                           <Search size={11} />Trace
                         </button>
                       )}
@@ -175,8 +243,8 @@ export function EntriesTab() {
                           title={e.newer_processed_count > 0 ? t('entries.cascade_revert_title', { n: e.newer_processed_count }) : t('entries.revert_one_title')}
                           style={{
                             display: 'flex', alignItems: 'center', gap: 3, padding: '3px 7px',
-                            borderRadius: 6, border: '1px solid rgba(248,113,113,0.4)', cursor: 'pointer',
-                            background: 'rgba(248,113,113,0.08)', color: '#f87171', fontSize: 11,
+                            borderRadius: 6, border: '1px solid var(--engram-accent-warning)', cursor: 'pointer',
+                            background: 'var(--engram-tint-warning)', color: 'var(--engram-accent-warning)', fontSize: 11,
                             opacity: revertingIds.has(e.id) ? 0.5 : 1,
                           }}>
                           <RotateCcw size={11} />
@@ -218,26 +286,40 @@ export function EntriesTab() {
 
 function StatusBadge({ status }: { status: string }) {
   const { t } = useI18n()
-  const cfg: Record<string, { bg: string; color: string; label: string }> = {
-    captured:     { bg: 'rgba(79,90,110,0.35)',  color: '#8892a4', label: t('entries.status_captured') },
-    processed:    { bg: 'rgba(16,185,129,0.15)', color: '#10b981', label: t('entries.status_processed') },
-    slice_failed: { bg: 'rgba(248,113,113,0.15)', color: '#f87171', label: t('entries.status_slice_failed') },
-    reverted:     { bg: 'rgba(245,158,11,0.15)', color: '#f59e0b', label: t('entries.status_reverted') },
+  const cfg: Record<string, { bg: string; color: string; label: string; pulse?: boolean }> = {
+    captured:     { bg: 'var(--engram-tint-secondary)', color: 'var(--engram-text-secondary)', label: t('entries.status_captured') },
+    processing:   { bg: 'var(--engram-tint-primary)',   color: 'var(--engram-accent-primary)', label: t('entries.status_processing'), pulse: true },
+    processed:    { bg: 'var(--engram-tint-success)',   color: 'var(--engram-accent-success)', label: t('entries.status_processed') },
+    slice_failed: { bg: 'var(--engram-tint-warning)',   color: 'var(--engram-accent-warning)', label: t('entries.status_slice_failed') },
+    failed:       { bg: 'var(--engram-tint-warning)',   color: 'var(--engram-accent-warning)', label: t('entries.status_failed') },
+    reverted:     { bg: 'var(--engram-tint-strength)',  color: 'var(--engram-accent-strength)', label: t('entries.status_reverted') },
   }
   const s = cfg[status] || cfg.captured
-  return <span className="badge" style={{ background: s.bg, color: s.color }}>{s.label}</span>
+  return (
+    <span className="badge" style={{ background: s.bg, color: s.color, display: 'inline-flex', alignItems: 'center', gap: 5 }}>
+      {s.pulse && (
+        <span style={{
+          width: 6, height: 6, borderRadius: '50%',
+          background: s.color,
+          animation: 'pulse 1.2s ease-in-out infinite',
+        }} />
+      )}
+      {s.label}
+    </span>
+  )
 }
 
 function EntryDetailPanel({ detail, onTrace }: { detail: EntryDetail; onTrace: () => void }) {
   const schemas = useDimensionSchemas()
   const { backbones } = useBackbones()
+  const colorOf = useDomainColor()
   const { t, lang } = useI18n()
   return (
     <div style={{ padding: '24px 28px', maxWidth: 720 }}>
       {/* Header */}
       <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
         <div>
-          <span className="badge" style={{ background: 'rgba(99,102,241,0.15)', color: 'var(--accent2)', marginBottom: 8, display: 'inline-flex' }}>
+          <span className="badge" style={{ background: 'var(--engram-tint-primary)', color: 'var(--accent2)', marginBottom: 8, display: 'inline-flex' }}>
             Entry #{detail.entry.id}
           </span>
           <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.7 }}>{detail.entry.raw}</div>
@@ -272,7 +354,7 @@ function EntryDetailPanel({ detail, onTrace }: { detail: EntryDetail; onTrace: (
           <div className="t-caption" style={{ marginBottom: 12 }}>{t('entries.activation_nodes', { n: detail.activations.length })}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             {detail.activations.map((a, i) => {
-              const color = getDomainColor(a.domain, backbones)
+              const color = colorOf(a.domain, backbones)
               return (
                 <div key={i} style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--surface2)', border: '1px solid var(--border)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: a.user_relevance ? 4 : 0 }}>
@@ -373,7 +455,7 @@ function FeatureBlock({ f, schemas }: { f: SliceFeature; schemas: DimensionSchem
   )
 }
 
-const LEVEL_COLOR: Record<string, string> = { high: '#f87171', medium: '#f59e0b', low: '#34d399' }
+const LEVEL_COLOR: Record<string, string> = { high: 'var(--engram-accent-warning)', medium: 'var(--engram-accent-strength)', low: 'var(--engram-accent-success)' }
 
 function SituationBadges({ sit }: { sit: SituationContext }) {
   const { t } = useI18n()
@@ -413,7 +495,7 @@ function SituationBadges({ sit }: { sit: SituationContext }) {
 
 // ── Trace Modal ───────────────────────────────────────────────────────────────
 
-const EDGE_COLORS: Record<string, string> = { supports: '#818cf8', opposes: '#f87171', derives: '#34d399', similar: '#94a3b8', related: '#64748b' }
+const EDGE_COLORS: Record<string, string> = { supports: 'var(--engram-accent-highlight)', opposes: 'var(--engram-accent-warning)', derives: 'var(--engram-accent-success)', similar: 'var(--engram-accent-secondary)', related: 'var(--engram-text-quiet)' }
 
 const FIELD_HINT_KEYS: Record<string, { title: string; body: string }> = {
   conf:     { title: 'fieldHint.conf_title',     body: 'fieldHint.conf_body' },
@@ -546,7 +628,7 @@ function TraceStage({ num, title, data, collapsed = false, children }: {
         onClick={() => setOpen(v => !v)}>
         <span style={{ fontSize: 10, fontWeight: 700, padding: '2px 7px', borderRadius: 99, background: 'var(--accent)', color: '#fff' }}>{num}</span>
         <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text)' }}>{title}</span>
-        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 99, fontWeight: 500, background: isEmpty ? 'rgba(79,90,110,0.25)' : 'rgba(16,185,129,0.15)', color: isEmpty ? 'var(--text3)' : '#10b981' }}>{badge}</span>
+        <span style={{ fontSize: 10, padding: '2px 8px', borderRadius: 99, fontWeight: 500, background: isEmpty ? 'var(--engram-tint-secondary)' : 'var(--engram-tint-success)', color: isEmpty ? 'var(--text3)' : 'var(--engram-accent-success)' }}>{badge}</span>
         <span style={{ marginLeft: 'auto', fontSize: 11, color: 'var(--text3)' }}>{open ? '▲' : '▼'}</span>
       </div>
       {open && <div style={{ padding: '12px 14px', borderTop: '1px solid var(--border)', fontSize: 11 }}>{children}</div>}
@@ -576,8 +658,9 @@ function TTable({ headers, rows }: { headers: React.ReactNode[]; rows: React.Rea
 
 function DPill({ domain }: { domain: string }) {
   const { backbones } = useBackbones()
+  const colorOf = useDomainColor()
   const { lang } = useI18n()
-  const c = getDomainColor(domain, backbones)
+  const c = colorOf(domain, backbones)
   return <span className="chip" style={{ background: c + '22', color: c }}>{getDomainLabel(domain, backbones, lang)}</span>
 }
 
@@ -618,7 +701,7 @@ function ProfileDiffContent({ diff }: { diff: NonNullable<TraceData['trace']>['p
             rows={Object.entries(keys as Record<string, Record<string, number>>).map(([k, v]) => [
               k,
               'delta' in v ? `${v.score_before} → ${v.score_after}` : `${JSON.stringify((v as unknown as Record<string, unknown>).before)} → ${JSON.stringify((v as unknown as Record<string, unknown>).after)}`,
-              'delta' in v ? <span style={{ color: v.delta > 0 ? '#10b981' : '#f87171', fontWeight: 700 }}>{v.delta > 0 ? '+' : ''}{v.delta}</span> : '—',
+              'delta' in v ? <span style={{ color: v.delta > 0 ? 'var(--engram-accent-success)' : 'var(--engram-accent-warning)', fontWeight: 700 }}>{v.delta > 0 ? '+' : ''}{v.delta}</span> : '—',
               'delta' in v ? `${v.conf_before} → ${v.conf_after}` : '—',
             ])}
           />
@@ -630,12 +713,13 @@ function ProfileDiffContent({ diff }: { diff: NonNullable<TraceData['trace']>['p
 
 function ActivationContent({ act }: { act: NonNullable<TraceData['trace']>['activation'] }) {
   const { backbones } = useBackbones()
+  const colorOf = useDomainColor()
   const { t } = useI18n()
   if (!act || !Object.keys(act).length) return <TEmpty text={t('entries.no_activation')} />
   return (
     <TTable headers={[t('entries.th_domain_act'), 'effort_weight', '']}
       rows={Object.entries(act).sort(([, a], [, b]) => b - a).map(([domain, w]) => {
-        const c = getDomainColor(domain, backbones)
+        const c = colorOf(domain, backbones)
         return [
           <DPill domain={domain} />,
           w.toFixed(3),
@@ -652,17 +736,18 @@ function RoughRetrievalContent({ nodes }: { nodes: NonNullable<TraceData['trace'
   const { t } = useI18n()
   if (!nodes?.length) return <TEmpty text={t('entries.empty_text')} />
   return <TTable headers={[t('entries.th_label'), t('entries.th_domain'), t('entries.th_type'), <span>strength<FieldHint field="strength" /></span>, <span>sim<FieldHint field="sim" /></span>]}
-    rows={nodes.map(n => [n.label, <DPill domain={n.domain} />, n.node_type, n.strength.toFixed(3), <span style={{ color: '#10b981' }}>{n.sim.toFixed(3)}</span>])} />
+    rows={nodes.map(n => [n.label, <DPill domain={n.domain} />, n.node_type, n.strength.toFixed(3), <span style={{ color: 'var(--engram-accent-success)' }}>{n.sim.toFixed(3)}</span>])} />
 }
 
 function NodeExtractContent({ extract }: { extract: NonNullable<TraceData['trace']>['node_extract'] }) {
   const { backbones } = useBackbones()
+  const colorOf = useDomainColor()
   const { lang, t } = useI18n()
   if (!extract || !Object.keys(extract).length) return <TEmpty text={t('entries.no_extract')} />
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
       {Object.entries(extract).map(([domain, nodes]) => {
-        const c = getDomainColor(domain, backbones)
+        const c = colorOf(domain, backbones)
         return (
           <div key={domain}>
             <div style={{ fontSize: 10, fontWeight: 600, color: c, marginBottom: 6 }}>{t('entries.domain_n_nodes', { domain: getDomainLabel(domain, backbones, lang), n: nodes.length })}</div>
@@ -683,7 +768,7 @@ function ConfirmedNodesContent({ nodes }: { nodes: NonNullable<TraceData['trace'
   return <TTable headers={[t('entries.th_label'), t('entries.th_domain'), t('entries.th_type'), t('entries.th_status'), <span>strength<FieldHint field="strength" /></span>, <span>conf<FieldHint field="conf" /></span>]}
     rows={nodes.map(n => [
       n.label, <DPill domain={n.domain} />, n.node_type,
-      <span className="badge" style={n.is_new ? { background: 'rgba(16,185,129,0.15)', color: '#10b981' } : { background: 'rgba(99,102,241,0.15)', color: '#818cf8' }}>{n.is_new ? t('entries.badge_new') : t('entries.badge_hit')}</span>,
+      <span className="badge" style={n.is_new ? { background: 'var(--engram-tint-success)', color: 'var(--engram-accent-success)' } : { background: 'var(--engram-tint-primary)', color: 'var(--engram-accent-highlight)' }}>{n.is_new ? t('entries.badge_new') : t('entries.badge_hit')}</span>,
       n.strength.toFixed(3), n.new_conf != null ? n.new_conf.toFixed(3) : '—',
     ])} />
 }
@@ -697,7 +782,7 @@ function SubgraphContent({ sg }: { sg: NonNullable<TraceData['trace']>['subgraph
       <div style={{ color: 'var(--text3)', fontSize: 11 }}>{t('entries.nodes_edges_label', { nodes: nodes.length, edges: edges.length })}</div>
       {nodes.length > 0 && <TTable headers={[t('entries.th_label'), t('entries.th_domain'), <span>strength<FieldHint field="strength" /></span>]} rows={nodes.map(n => [n.label, <DPill domain={n.domain} />, n.strength.toFixed(3)])} />}
       {edges.length > 0 && <TTable headers={['from', t('entries.th_relation'), 'to', <span>weight<FieldHint field="weight" /></span>]}
-        rows={edges.map(e => [e.from_label, <span style={{ color: EDGE_COLORS[e.relation_type] || '#64748b' }}>{e.relation_type}</span>, e.to_label, (e.weight ?? 0).toFixed(3)])} />}
+        rows={edges.map(e => [e.from_label, <span style={{ color: EDGE_COLORS[e.relation_type] || 'var(--engram-text-quiet)' }}>{e.relation_type}</span>, e.to_label, (e.weight ?? 0).toFixed(3)])} />}
     </div>
   )
 }
@@ -708,7 +793,7 @@ function EdgeExtractContent({ edges }: { edges: NonNullable<TraceData['trace']>[
   return <TTable headers={['from', t('entries.th_relation'), 'to', t('entries.th_direction'), <span>conf<FieldHint field="conf" /></span>, t('entries.th_evidence')]}
     rows={edges.map(e => [
       e.from_label,
-      <span style={{ color: EDGE_COLORS[e.relation_type] || '#64748b' }}>{e.relation_type}</span>,
+      <span style={{ color: EDGE_COLORS[e.relation_type] || 'var(--engram-text-quiet)' }}>{e.relation_type}</span>,
       e.to_label,
       <span style={{ color: 'var(--text3)' }}>{e.direction}</span>,
       e.confidence.toFixed(2),
@@ -724,32 +809,111 @@ function DbDiffContent({ diff }: { diff: NonNullable<TraceData['trace']>['db_dif
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
       {nn.length > 0 && <>
-        <div style={{ fontSize: 10, fontWeight: 600, color: '#10b981' }}>{t('entries.new_nodes_n', { n: nn.length })}</div>
+        <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--engram-accent-success)' }}>{t('entries.new_nodes_n', { n: nn.length })}</div>
         <TTable headers={[t('entries.th_id'), t('entries.th_label'), t('entries.th_domain'), t('entries.th_type'), <span>strength<FieldHint field="strength" /></span>]}
           rows={nn.map(n => [`#${n.id}`, n.label, <DPill domain={n.domain} />, n.node_type, n.strength.toFixed(3)])} />
       </>}
       {nu.length > 0 && <>
-        <div style={{ fontSize: 10, fontWeight: 600, color: '#818cf8' }}>{t('entries.update_nodes_n', { n: nu.length })}</div>
+        <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--engram-accent-highlight)' }}>{t('entries.update_nodes_n', { n: nu.length })}</div>
         <TTable headers={[t('entries.th_label'), t('entries.th_domain'), <span>before<FieldHint field="strength" /></span>, 'after', 'Δ']}
           rows={nu.map(n => {
             const d = n.strength_after - n.strength_before
-            return [n.label, <DPill domain={n.domain} />, n.strength_before.toFixed(3), n.strength_after.toFixed(3), <span style={{ color: d > 0 ? '#10b981' : '#f87171', fontWeight: 700 }}>{d > 0 ? '+' : ''}{d.toFixed(3)}</span>]
+            return [n.label, <DPill domain={n.domain} />, n.strength_before.toFixed(3), n.strength_after.toFixed(3), <span style={{ color: d > 0 ? 'var(--engram-accent-success)' : 'var(--engram-accent-warning)', fontWeight: 700 }}>{d > 0 ? '+' : ''}{d.toFixed(3)}</span>]
           })} />
       </>}
       {en.length > 0 && <>
-        <div style={{ fontSize: 10, fontWeight: 600, color: '#10b981' }}>{t('entries.new_edges_n', { n: en.length })}</div>
+        <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--engram-accent-success)' }}>{t('entries.new_edges_n', { n: en.length })}</div>
         <TTable headers={['from', t('entries.th_relation'), 'to', <span>weight<FieldHint field="weight" /></span>]}
-          rows={en.map(e => [e.from_label, <span style={{ color: EDGE_COLORS[e.relation_type] || '#64748b' }}>{e.relation_type}</span>, e.to_label, (e.weight ?? 0).toFixed(3)])} />
+          rows={en.map(e => [e.from_label, <span style={{ color: EDGE_COLORS[e.relation_type] || 'var(--engram-text-quiet)' }}>{e.relation_type}</span>, e.to_label, (e.weight ?? 0).toFixed(3)])} />
       </>}
       {eu.length > 0 && <>
-        <div style={{ fontSize: 10, fontWeight: 600, color: '#818cf8' }}>{t('entries.update_edges_n', { n: eu.length })}</div>
+        <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--engram-accent-highlight)' }}>{t('entries.update_edges_n', { n: eu.length })}</div>
         <TTable headers={['from', t('entries.th_relation'), 'to', <span>weight delta<FieldHint field="weight" /></span>]}
           rows={eu.map(e => {
             const dw = (e.weight_after ?? 0) - (e.weight_before ?? 0)
-            return [e.from_label, <span style={{ color: EDGE_COLORS[e.relation_type] || '#64748b' }}>{e.relation_type}</span>, e.to_label,
-              <span>{(e.weight_before ?? 0).toFixed(3)} → <b>{(e.weight_after ?? 0).toFixed(3)}</b> <span style={{ color: dw >= 0 ? '#10b981' : '#f87171', fontWeight: 700 }}>{dw >= 0 ? '+' : ''}{dw.toFixed(3)}</span></span>]
+            return [e.from_label, <span style={{ color: EDGE_COLORS[e.relation_type] || 'var(--engram-text-quiet)' }}>{e.relation_type}</span>, e.to_label,
+              <span>{(e.weight_before ?? 0).toFixed(3)} → <b>{(e.weight_after ?? 0).toFixed(3)}</b> <span style={{ color: dw >= 0 ? 'var(--engram-accent-success)' : 'var(--engram-accent-warning)', fontWeight: 700 }}>{dw >= 0 ? '+' : ''}{dw.toFixed(3)}</span></span>]
           })} />
       </>}
     </div>
+  )
+}
+
+function ProcessPanel({ entryId, events, done }: { entryId: number; events: ProcessEvent[]; done: boolean }) {
+  const { t } = useI18n()
+  const stageEvents = events.filter(e => e.type === 'stage')
+  const stages: { key: string; label: string; status: 'pending' | 'running' | 'done' | 'error' | 'skipped'; detail?: string }[] = []
+
+  function pushStage(key: string, label: string) {
+    const start = stageEvents.find(e => e.stage === key && e.status === 'start')
+    const end = stageEvents.find(e => e.stage === key && (e.status === 'done' || e.status === 'error' || e.status === 'skipped'))
+    if (!start && !end) return
+    let status: 'pending' | 'running' | 'done' | 'error' | 'skipped' = 'running'
+    let detail: string | undefined
+    if (end?.status === 'done') {
+      status = 'done'
+      if (key === 'slice' && end.feature_count != null) detail = t('entries.process_slice_detail', { n: end.feature_count })
+      else if (key === 'backbone') {
+        const nodes = end.nodes_upserted ?? 0
+        const edges = end.edges_upserted ?? 0
+        detail = t('entries.process_backbone_detail', { nodes, edges })
+      }
+    } else if (end?.status === 'error') {
+      status = 'error'; detail = end.message
+    } else if (end?.status === 'skipped') {
+      status = 'skipped'
+    }
+    stages.push({ key, label, status, detail })
+  }
+
+  pushStage('slice',    t('entries.process_stage_slice'))
+  pushStage('backbone', t('entries.process_stage_backbone'))
+
+  const errEvent = stageEvents.find(e => e.stage === 'pipeline' && e.status === 'error')
+  const doneEvent = stageEvents.find(e => e.stage === 'pipeline' && e.status === 'done')
+
+  return (
+    <div style={{
+      marginTop: 8, padding: '8px 10px', fontSize: 11, lineHeight: 1.55,
+      color: 'var(--text2)', background: 'var(--surface2)',
+      border: '1px solid var(--border)', borderRadius: 6,
+      transition: 'opacity 0.4s', opacity: done ? 0.85 : 1,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
+        <span style={{ fontWeight: 600, color: 'var(--text)' }}>
+          {done ? (errEvent ? t('entries.process_failed') : t('entries.process_done', { ms: doneEvent?.duration_ms ?? 0 }))
+                : t('entries.process_running')}
+        </span>
+        <span style={{ fontSize: 10, color: 'var(--text3)' }}>#{entryId}</span>
+      </div>
+      {stages.map(s => (
+        <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
+          <StageDot status={s.status} />
+          <span style={{ flex: 1 }}>{s.label}</span>
+          {s.detail && <span style={{ fontSize: 10, color: 'var(--text3)' }}>{s.detail}</span>}
+        </div>
+      ))}
+      {errEvent?.message && (
+        <div style={{ marginTop: 4, color: 'var(--engram-accent-warning)', fontSize: 10 }}>
+          {errEvent.message}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function StageDot({ status }: { status: 'pending' | 'running' | 'done' | 'error' | 'skipped' }) {
+  const color =
+    status === 'done'    ? 'var(--engram-accent-success, #6b8e6b)' :
+    status === 'error'   ? 'var(--engram-accent-warning, #b96a52)' :
+    status === 'skipped' ? 'var(--text3)' :
+    status === 'running' ? 'var(--engram-accent-primary, #8a7aa6)' :
+                            'var(--border2)'
+  const animated = status === 'running'
+  return (
+    <span style={{
+      width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0,
+      animation: animated ? 'pulse 1.2s ease-in-out infinite' : 'none',
+    }} />
   )
 }

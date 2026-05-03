@@ -4,10 +4,12 @@ import cytoscape from 'cytoscape'
 import type { Core, NodeSingular, EdgeSingular } from 'cytoscape'
 import { fetchGraphSeed, fetchGraphExpand } from '@/api'
 import type { GraphNode, GraphEdge } from '@/types'
-import { TYPE_SHAPES, RELATION_COLORS, getDomainColor, getDomainLabel, getRelationLabel } from '@/lib/constants'
+import { TYPE_SHAPES, RELATION_COLORS, getDomainLabel, getRelationLabel } from '@/lib/constants'
 import { fmtTime } from '@/lib/utils'
 import { useI18n } from '@/i18n'
 import { useBackbones } from '@/lib/useBackbones'
+import { useTheme, useDomainColor } from '@/lib/theme'
+import { Logo } from '@/components/ui/Logo'
 
 const SEED_LIMIT = 24
 
@@ -36,6 +38,8 @@ function nodeSize(weight: number) {
 export function GraphTab({ active }: { active?: boolean }) {
   const { lang, t } = useI18n()
   const { backbones } = useBackbones()
+  const { theme } = useTheme()
+  const colorOf = useDomainColor()
   const DOMAINS = backbones.map(b => b.key)
   const [domain, setDomain] = useState('')
   const [detail, setDetail] = useState<Detail | null>(null)
@@ -62,15 +66,22 @@ export function GraphTab({ active }: { active?: boolean }) {
     }
   }, [active])
 
+  // Theme-aware color tokens for cytoscape (cy stylesheet doesn't resolve CSS
+  // vars). When theme flips we rebuild + re-apply via cy.style().
+  const isDark = theme === 'dark'
+  const cyTokens = isDark
+    ? { nodeLabel: '#E8E2D8', textOutline: '#1B1D1F', edgeLabel: '#968F86', edgeLabelBg: '#1B1D1F', focusBorder: '#FBF8F3', dimText: 'rgba(232,226,216,0.32)' }
+    : { nodeLabel: '#FBF8F3', textOutline: '#2D2A26', edgeLabel: '#786F65', edgeLabelBg: '#FBF8F3', focusBorder: '#2D2A26', dimText: 'rgba(45,42,38,0.32)' }
+
   const buildStyle = useCallback(() => [
     {
       selector: 'node',
       style: {
-        'background-color': (ele: NodeSingular) => getDomainColor(ele.data('domain') as string, backbones),
+        'background-color': (ele: NodeSingular) => colorOf(ele.data('domain') as string, backbones),
         'background-opacity': 0.92,
         'background-blacken': (ele: NodeSingular) => ele.data('origin') === 'external' ? 0.25 : -0.05,
         label: 'data(label)',
-        color: '#fff',
+        color: cyTokens.nodeLabel,
         'font-size': (ele: NodeSingular) => Math.max(10, Math.min(15, 9 + Math.log10(1 + (ele.data('weight') as number) * 9) * 6)),
         'font-weight': 600 as never,
         'text-valign': 'center' as const,
@@ -80,10 +91,10 @@ export function GraphTab({ active }: { active?: boolean }) {
         width:  (ele: NodeSingular) => nodeSize(ele.data('weight') as number),
         height: (ele: NodeSingular) => nodeSize(ele.data('weight') as number),
         shape: (ele: NodeSingular) => TYPE_SHAPES[ele.data('node_type') as string] || 'ellipse',
-        'border-color': (ele: NodeSingular) => getDomainColor(ele.data('domain') as string, backbones),
+        'border-color': (ele: NodeSingular) => colorOf(ele.data('domain') as string, backbones),
         'border-width': 2,
         'border-opacity': 0.9,
-        'text-outline-color': '#0a0d14',
+        'text-outline-color': cyTokens.textOutline,
         'text-outline-width': 2,
         'text-outline-opacity': 0.85,
         'overlay-padding': 6,
@@ -94,8 +105,8 @@ export function GraphTab({ active }: { active?: boolean }) {
     {
       selector: 'edge',
       style: {
-        'line-color': (ele: EdgeSingular) => RELATION_COLORS[ele.data('relation') as string] || '#64748b',
-        'target-arrow-color': (ele: EdgeSingular) => RELATION_COLORS[ele.data('relation') as string] || '#64748b',
+        'line-color': (ele: EdgeSingular) => RELATION_COLORS[ele.data('relation') as string] || '#75716B',
+        'target-arrow-color': (ele: EdgeSingular) => RELATION_COLORS[ele.data('relation') as string] || '#75716B',
         'target-arrow-shape': 'triangle' as const,
         'arrow-scale': 0.9,
         'line-style': (ele: EdgeSingular) => (ele.data('relation') === 'similar' ? 'dashed' : 'solid') as 'dashed' | 'solid',
@@ -106,8 +117,8 @@ export function GraphTab({ active }: { active?: boolean }) {
         'control-point-step-size': 60,
         label: 'data(relation)',
         'font-size': 9,
-        color: '#94a3b8',
-        'text-background-color': '#0a0d14',
+        color: cyTokens.edgeLabel,
+        'text-background-color': cyTokens.edgeLabelBg,
         'text-background-opacity': 0.85,
         'text-background-padding': '3px',
         'text-rotation': 'autorotate' as const,
@@ -118,7 +129,7 @@ export function GraphTab({ active }: { active?: boolean }) {
     // ─── Layer order matters: later rules override earlier on overlapping properties ───
 
     // Layer 1 — Backgrounding (lowest priority)
-    { selector: 'node.dim', style: { 'background-opacity': 0.18, color: 'rgba(255,255,255,0.25)', 'text-outline-opacity': 0.2, 'border-opacity': 0.2, 'z-index': 1 } },
+    { selector: 'node.dim', style: { 'background-opacity': 0.18, color: cyTokens.dimText, 'text-outline-opacity': 0.2, 'border-opacity': 0.2, 'z-index': 1 } },
     { selector: 'edge.dim',  style: { opacity: 0.06 } },
 
     // Layer 2 — Neighborhood emphasis
@@ -127,16 +138,16 @@ export function GraphTab({ active }: { active?: boolean }) {
     { selector: 'edge.hop1', style: { opacity: 0.85, width: (ele: EdgeSingular) => Math.max(1.5, (ele.data('weight') as number) * 4) } },
 
     // Layer 3 — Persistent state markers
-    // "Has hidden neighbors" — amber double border signals more to discover
+    // "Has hidden neighbors" — mustard double border signals more to discover
     { selector: 'node.has-unexpanded', style: {
         'border-style': 'double' as never,
         'border-width': 5,
-        'border-color': '#fbbf24',
+        'border-color': '#CCB67A',
         'border-opacity': 0.85,
     } },
-    // "Already expanded by user" — teal outline ring signals visited
+    // "Already expanded by user" — sage outline ring signals visited
     { selector: 'node.expanded', style: {
-        'outline-color': '#5eead4',
+        'outline-color': '#A3B89F',
         'outline-width': 3,
         'outline-offset': 3,
         'outline-opacity': 0.65,
@@ -145,7 +156,7 @@ export function GraphTab({ active }: { active?: boolean }) {
     // Layer 4 — Active focus (must dominate persistent markers)
     { selector: 'node.focus', style: {
         'border-width': 5,
-        'border-color': '#ffffff',
+        'border-color': cyTokens.focusBorder,
         'border-opacity': 1,
         'border-style': 'solid' as never,
         'background-opacity': 1,
@@ -154,11 +165,11 @@ export function GraphTab({ active }: { active?: boolean }) {
 
     // Layer 5 — Loading transient (briefly overrides focus to signal action)
     { selector: 'node.expanding', style: {
-        'border-color': '#fbbf24',
+        'border-color': '#CCB67A',
         'border-width': 4,
         'border-style': 'dashed' as never,
     } },
-  ], [])
+  ], [backbones, cyTokens, colorOf])
 
   // ─── Highlight management ────────────────────────────────────────────────────
   const applyFocus = useCallback((nodeId: string | null) => {
@@ -188,7 +199,7 @@ export function GraphTab({ active }: { active?: boolean }) {
         relation: edge.data('relation') as string,
         dir: edge.source().id() === node.id() ? '→' : '←',
         label: other.data('label') as string,
-        color: RELATION_COLORS[edge.data('relation') as string] || '#64748b',
+        color: RELATION_COLORS[edge.data('relation') as string] || '#75716B',
       })
     })
     return {
@@ -548,6 +559,14 @@ export function GraphTab({ active }: { active?: boolean }) {
     }
   }, [])
 
+  // Re-apply stylesheet when theme flips (preserves layout, expansion state,
+  // focus, etc. — only colors/labels are recomputed).
+  useEffect(() => {
+    if (cyRef.current) {
+      cyRef.current.style(buildStyle() as never)
+    }
+  }, [theme, buildStyle])
+
   const closeDetail = () => {
     applyFocus(null)
     setFocusId(null)
@@ -593,7 +612,7 @@ export function GraphTab({ active }: { active?: boolean }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '10px 16px', flexShrink: 0, flexWrap: 'wrap', background: 'var(--surface)', borderBottom: '1px solid var(--border)' }}>
         <DomainBtn label={t('graph.all')} color="var(--accent)" active={domain === ''} onClick={() => setDomain('')} />
         {DOMAINS.map(d => (
-          <DomainBtn key={d} label={getDomainLabel(d, backbones, lang)} color={getDomainColor(d, backbones)} active={domain === d} onClick={() => setDomain(d)} />
+          <DomainBtn key={d} label={getDomainLabel(d, backbones, lang)} color={colorOf(d, backbones)} active={domain === d} onClick={() => setDomain(d)} />
         ))}
         <div style={{ marginLeft: 'auto', display: 'flex', gap: 6, alignItems: 'center' }}>
           <span style={{ fontSize: 10, color: 'var(--text3)', marginRight: 4 }}>{t('graph.nodes_hint', { count: loadedCount })}</span>
@@ -606,16 +625,26 @@ export function GraphTab({ active }: { active?: boolean }) {
       <div style={{ display: 'flex', flex: 1, overflow: 'hidden' }}>
         <div style={{
           position: 'relative', flex: 1, overflow: 'hidden',
-          background: 'radial-gradient(ellipse at center, #141926 0%, #0a0d14 75%)',
+          background: 'radial-gradient(ellipse at center, var(--engram-graph-bg-inner) 0%, var(--engram-graph-bg-outer) 75%)',
         }}>
           {/* Decorative grid overlay */}
           <div style={{
             position: 'absolute', inset: 0, pointerEvents: 'none',
-            backgroundImage: 'radial-gradient(circle, rgba(255,255,255,0.04) 1px, transparent 1px)',
+            backgroundImage: 'radial-gradient(circle, var(--engram-graph-grid-dot) 1px, transparent 1px)',
             backgroundSize: '32px 32px',
             maskImage: 'radial-gradient(ellipse at center, black 50%, transparent 90%)',
             WebkitMaskImage: 'radial-gradient(ellipse at center, black 50%, transparent 90%)',
           }} />
+          {/* Watermark — low-opacity wordmark in the top-left corner */}
+          <div style={{
+            position: 'absolute', top: 18, left: 22,
+            pointerEvents: 'none', userSelect: 'none',
+            opacity: 0.18,
+            color: 'var(--engram-text-primary)',
+            zIndex: 2,
+          }}>
+            <Logo size="sm" accent={true} />
+          </div>
           {isLoading && (
             <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', fontSize: 13, zIndex: 5 }}>
               <span className="pulse">{t('common.loading')}</span>
@@ -632,11 +661,11 @@ export function GraphTab({ active }: { active?: boolean }) {
           {expandingId !== null && (
             <div style={{
               position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
-              background: 'rgba(20,25,38,0.85)', border: '1px solid var(--border)',
+              background: 'var(--engram-graph-tooltip-bg)', border: '1px solid var(--border)',
               padding: '6px 14px', borderRadius: 99, fontSize: 11, color: 'var(--text2)',
               zIndex: 10, backdropFilter: 'blur(6px)',
             }}>
-              <span style={{ color: '#fbbf24', marginRight: 6 }}>◐</span> {t('graph.expanding')}
+              <span style={{ color: '#CCB67A', marginRight: 6 }}>◐</span> {t('graph.expanding')}
             </div>
           )}
           {focusId !== null && expandingId === null && (() => {
@@ -644,12 +673,12 @@ export function GraphTab({ active }: { active?: boolean }) {
             if (!node?.length) return null
             const label = node.data('label') as string
             const dom = node.data('domain') as string
-            const color = getDomainColor(dom, backbones)
+            const color = colorOf(dom, backbones)
             const isOpen = detail?.kind === 'node' && detail.db_id === focusId
             return (
               <div className="fade-in" style={{
                 position: 'absolute', top: 12, left: '50%', transform: 'translateX(-50%)',
-                background: 'rgba(20,25,38,0.92)', border: '1px solid var(--border)',
+                background: 'var(--engram-graph-tooltip-bg)', border: '1px solid var(--border)',
                 padding: '6px 6px 6px 14px', borderRadius: 99, fontSize: 12,
                 zIndex: 10, backdropFilter: 'blur(8px)', display: 'flex', alignItems: 'center', gap: 10,
                 maxWidth: 'calc(100% - 32px)',
@@ -667,7 +696,7 @@ export function GraphTab({ active }: { active?: boolean }) {
                   }}
                   style={{
                     background: isOpen ? 'var(--surface2)' : 'var(--accent)',
-                    color: isOpen ? 'var(--text2)' : '#fff',
+                    color: isOpen ? 'var(--text2)' : 'var(--engram-bg-canvas)',
                     border: 'none', borderRadius: 99, padding: '4px 12px',
                     fontSize: 11, fontWeight: 500, cursor: 'pointer',
                   }}>
@@ -684,7 +713,7 @@ export function GraphTab({ active }: { active?: boolean }) {
             <div style={{ padding: '14px 16px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'flex-start', gap: 10 }}>
               <div style={{ flex: 1, minWidth: 0 }}>
                 {detail.kind === 'node' && (() => {
-                  const color = getDomainColor(detail.domain, backbones)
+                  const color = colorOf(detail.domain, backbones)
                   return (
                     <>
                       <span className="badge" style={{ background: color + '22', color, marginBottom: 6, display: 'inline-flex' }}>
@@ -693,7 +722,7 @@ export function GraphTab({ active }: { active?: boolean }) {
                       </span>
                       <div style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', lineHeight: 1.3 }}>{detail.label}</div>
                       {detail.unexpanded > 0 && (
-                        <div style={{ fontSize: 11, color: '#fbbf24', marginTop: 4 }}>
+                        <div style={{ fontSize: 11, color: '#CCB67A', marginTop: 4 }}>
                           {t('graph.unexpanded_hint', { n: detail.unexpanded })}
                         </div>
                       )}
@@ -701,7 +730,7 @@ export function GraphTab({ active }: { active?: boolean }) {
                   )
                 })()}
                 {detail.kind === 'edge' && (() => {
-                  const color = RELATION_COLORS[detail.relation] || '#64748b'
+                  const color = RELATION_COLORS[detail.relation] || '#75716B'
                   return (
                     <>
                       <span className="badge" style={{ background: color + '22', color, marginBottom: 6, display: 'inline-flex' }}>{t('graph.relation_prefix')} · {getRelationLabel(detail.relation, lang)}</span>
@@ -732,19 +761,19 @@ export function GraphTab({ active }: { active?: boolean }) {
       <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '8px 16px', flexWrap: 'wrap', flexShrink: 0, background: 'var(--surface)', borderTop: '1px solid var(--border)', fontSize: 10, color: 'var(--text3)' }}>
         {DOMAINS.map(d => (
           <span key={d} style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
-            <span style={{ width: 8, height: 8, borderRadius: '50%', background: getDomainColor(d, backbones), flexShrink: 0 }} />{getDomainLabel(d, backbones, lang)}
+            <span style={{ width: 8, height: 8, borderRadius: '50%', background: colorOf(d, backbones), flexShrink: 0 }} />{getDomainLabel(d, backbones, lang)}
           </span>
         ))}
         <span style={{ width: 1, height: 12, background: 'var(--border)', margin: '0 2px' }} />
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 18, borderTop: '2px dashed #94a3b8', display: 'inline-block' }} />{getRelationLabel('similar', lang)}</span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 18, height: 2, background: '#818cf8', display: 'inline-block' }} />{getRelationLabel('supports', lang)}</span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 18, height: 2, background: '#f87171', display: 'inline-block' }} />{getRelationLabel('opposes', lang)}</span>
-        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 18, height: 2, background: '#34d399', display: 'inline-block' }} />{getRelationLabel('derives', lang)}</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 18, borderTop: '2px dashed #9AA8B5', display: 'inline-block' }} />{getRelationLabel('similar', lang)}</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 18, height: 2, background: '#D0A892', display: 'inline-block' }} />{getRelationLabel('supports', lang)}</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 18, height: 2, background: '#C0816A', display: 'inline-block' }} />{getRelationLabel('opposes', lang)}</span>
+        <span style={{ display: 'flex', alignItems: 'center', gap: 4 }}><span style={{ width: 18, height: 2, background: '#A3B89F', display: 'inline-block' }} />{getRelationLabel('derives', lang)}</span>
         <span style={{ width: 1, height: 12, background: 'var(--border)', margin: '0 2px' }} />
         <span>{t('graph.legend_shapes')}</span>
         <span style={{ width: 1, height: 12, background: 'var(--border)', margin: '0 2px' }} />
-        <span style={{ color: '#fbbf24' }}>{t('graph.legend_pending')}</span>
-        <span style={{ color: '#5eead4' }}>{t('graph.legend_expanded')}</span>
+        <span style={{ color: '#CCB67A' }}>{t('graph.legend_pending')}</span>
+        <span style={{ color: '#A3B89F' }}>{t('graph.legend_expanded')}</span>
       </div>
     </div>
   )
@@ -809,8 +838,8 @@ function NodeDetailBody({ d, isExpanded, onExpand, onCollapse, expanding }: {
             disabled={expanding}
             style={{
               flex: 1, padding: '8px 12px', borderRadius: 8,
-              border: '1px solid #fbbf24', background: 'rgba(251,191,36,0.12)',
-              color: '#fbbf24', fontSize: 11, fontWeight: 500,
+              border: '1px solid #CCB67A', background: 'var(--engram-tint-strength)',
+              color: '#CCB67A', fontSize: 11, fontWeight: 500,
               cursor: expanding ? 'wait' : 'pointer',
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
             }}>
@@ -864,7 +893,7 @@ function NodeDetailBody({ d, isExpanded, onExpand, onCollapse, expanding }: {
 
 function EdgeDetailBody({ d }: { d: EdgeDetail }) {
   const { t, lang } = useI18n()
-  const color = RELATION_COLORS[d.relation] || '#64748b'
+  const color = RELATION_COLORS[d.relation] || '#75716B'
   return (
     <>
       <Sec title={t('graph.edge_props')}>

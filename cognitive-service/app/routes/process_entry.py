@@ -6,10 +6,12 @@ import time
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.lib.backbone_pipeline import run_backbone_pipeline
 from app.lib.db import get_conn
+from app.lib import process_events
 from app.lib.slice_pipeline import generate_slice
 from shared.llm import capture_llm_calls
 
@@ -214,6 +216,24 @@ async def _run_pipeline(entry_id: int, row) -> ProcessResult:
     }
     llm_calls: list[dict] = []
 
+    def _emit(stage: str, status: str, **extra) -> None:
+        process_events.publish(entry_id, {
+            "type": "stage", "stage": stage, "status": status,
+            "elapsed_ms": int((time.perf_counter() - started_perf) * 1000),
+            **extra,
+        })
+
+    _emit("pipeline", "start", raw_chars=len(raw or ""))
+
+    # Mark the entry as in-flight so the UI can show a distinct "processing"
+    # badge instead of the misleading "captured / pending" one. The terminal
+    # status (processed / slice_failed / failed) is set later in this function.
+    with get_conn() as conn:
+        conn.execute(
+            "UPDATE entries SET processing_status='processing' WHERE id=?",
+            (entry_id,),
+        )
+
     # Rollback: 记录处理前的 profile_snapshot_id
     with get_conn() as conn:
         _prev_snap = conn.execute(
@@ -222,30 +242,51 @@ async def _run_pipeline(entry_id: int, row) -> ProcessResult:
         ).fetchone()
     prev_snapshot_id = _prev_snap["id"] if _prev_snap else None
 
-    with capture_llm_calls(llm_calls):
-        # Step 1: 切片生成 + 画像融合
-        profile_before = _snapshot_profile()
-        slice_id = await generate_slice(entry_id, raw)
-        profile_after = _snapshot_profile()
+    slice_id: int | None = None
+    backbone_stats: dict = {}
+    error_payload: dict | None = None
+    try:
+        with capture_llm_calls(llm_calls):
+            # Step 1: 切片生成 + 画像融合
+            _emit("slice", "start")
+            profile_before = _snapshot_profile()
+            slice_id = await generate_slice(entry_id, raw)
+            profile_after = _snapshot_profile()
 
-        if slice_id:
-            trace["slice"] = _get_slice_features(slice_id)
-            trace["profile_diff"] = _calc_profile_diff(profile_before, profile_after)
-            _save_profile_snapshot(entry_id)
+            if slice_id:
+                trace["slice"] = _get_slice_features(slice_id)
+                trace["profile_diff"] = _calc_profile_diff(profile_before, profile_after)
+                _save_profile_snapshot(entry_id)
+                _emit("slice", "done",
+                      feature_count=len(trace["slice"]),
+                      profile_changed_subdims=sum(len(v) for v in trace["profile_diff"].values()))
+            else:
+                _emit("slice", "skipped", reason="slice_failed")
 
-        # Step 2: 主干网生长
-        backbone_stats: dict = {}
-        if slice_id:
-            backbone_stats = await run_backbone_pipeline(entry_id, slice_id, raw, trace=trace, entry_dt=entry_dt)
-            with get_conn() as conn:
-                conn.execute(
-                    "UPDATE entries SET processing_status='processed' WHERE id=?", (entry_id,)
-                )
-        else:
-            with get_conn() as conn:
-                conn.execute(
-                    "UPDATE entries SET processing_status='slice_failed' WHERE id=?", (entry_id,)
-                )
+            # Step 2: 主干网生长
+            if slice_id:
+                _emit("backbone", "start")
+                backbone_stats = await run_backbone_pipeline(entry_id, slice_id, raw, trace=trace, entry_dt=entry_dt)
+                with get_conn() as conn:
+                    conn.execute(
+                        "UPDATE entries SET processing_status='processed' WHERE id=?", (entry_id,)
+                    )
+                _emit("backbone", "done",
+                      activated=backbone_stats.get("activated", []),
+                      nodes_upserted=backbone_stats.get("nodes_upserted", 0),
+                      edges_upserted=backbone_stats.get("edges_upserted", 0))
+            else:
+                with get_conn() as conn:
+                    conn.execute(
+                        "UPDATE entries SET processing_status='slice_failed' WHERE id=?", (entry_id,)
+                    )
+    except Exception as exc:
+        error_payload = {"message": str(exc), "type": exc.__class__.__name__}
+        _emit("pipeline", "error", **error_payload)
+        with get_conn() as conn:
+            conn.execute(
+                "UPDATE entries SET processing_status='failed' WHERE id=?", (entry_id,)
+            )
 
     trace["llm_calls"] = llm_calls
     trace["llm_summary"] = _summarize_llm_calls(llm_calls)
@@ -263,11 +304,39 @@ async def _run_pipeline(entry_id: int, row) -> ProcessResult:
 
     _save_trace(entry_id, trace, rollback)
 
+    final_status = "failed" if error_payload else ("done" if slice_id else "slice_failed")
+    _emit("pipeline", "done",
+          final_status=final_status,
+          duration_ms=trace["duration_ms"],
+          metrics=trace["metrics"])
+    process_events.finish(entry_id)
+
     return ProcessResult(
         entry_id=entry_id,
         slice_id=slice_id,
         activated=backbone_stats.get("activated", []),
         nodes_upserted=backbone_stats.get("nodes_upserted", 0),
         edges_upserted=backbone_stats.get("edges_upserted", 0),
-        status="done" if slice_id else "slice_failed",
+        status=final_status,
     )
+
+
+@router.get("/entries/{entry_id}/process/stream")
+async def stream_process(entry_id: int):
+    """NDJSON stream of pipeline stage events for a single entry.
+
+    Subscribers opened after the pipeline finishes (within the channel
+    retention window) get a full replay; otherwise the response is empty
+    and the caller should fall back to fetching the persisted trace.
+    """
+    async def gen():
+        try:
+            async for ev in process_events.subscribe(entry_id):
+                yield json.dumps(ev, ensure_ascii=False) + "\n"
+        except Exception as exc:
+            yield json.dumps(
+                {"type": "stream_error", "message": str(exc)},
+                ensure_ascii=False,
+            ) + "\n"
+
+    return StreamingResponse(gen(), media_type="application/x-ndjson")

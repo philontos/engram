@@ -64,21 +64,16 @@ def _load_entry_analyzers() -> tuple[list[dict], dict[str, dict]]:
     return analyzers, {a["key"]: a for a in analyzers}
 
 
-# Fallback palette used when a backbone config does not pin its own color.
-_DEFAULT_BACKBONE_PALETTE = [
-    "#a855f7", "#f59e0b", "#3b82f6", "#10b981",
-    "#ef4444", "#6366f1", "#06b6d4", "#84cc16",
-    "#ec4899", "#14b8a6",
-]
-
-
-def _auto_color(key: str, idx: int) -> str:
-    return _DEFAULT_BACKBONE_PALETTE[idx % len(_DEFAULT_BACKBONE_PALETTE)]
+# --------------------------------------------------------------------------
+# Color is a presentation concern — owned by the frontend. The backend
+# exposes only the knowledge model (key, name, description, focus hints).
+# The UI computes a deterministic, theme-aware Morandi color from the key
+# ordering at render time. See `frontend/src/lib/theme.ts` (`useDomainColor`).
+# --------------------------------------------------------------------------
 
 
 def _load_backbones() -> list[dict]:
     bbs = []
-    idx = 0
     for d in sorted(_BACKBONES_ROOT.iterdir()):
         if not d.is_dir() or d.name.startswith("_") or d.name.startswith("."):
             continue
@@ -89,16 +84,16 @@ def _load_backbones() -> list[dict]:
         cfg = dict(mod.BACKBONE)
         if not cfg.get("enabled", True):
             continue
+        # Strip any legacy "color" field — color is a frontend concern now.
+        cfg.pop("color", None)
         cfg["_dir"] = d
         cfg["name"] = cfg.get("name") or cfg["key"]
-        cfg["color"] = cfg.get("color") or _auto_color(cfg["key"], idx)
         # Per-domain internal prompt (carries domain perspective + node-type instructions)
         cfg["_internal_node_prompt"] = _read(d / "node_extract.spt")
         # focus_hints joined into a string for the external-prompt template
         hints = cfg.get("focus_hints") or []
         cfg["_focus_hints_text"] = "\n".join(f"- {h}" for h in hints) if hints else "(no extra guidance)"
         bbs.append(cfg)
-        idx += 1
     return bbs
 
 

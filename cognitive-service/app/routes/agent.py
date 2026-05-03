@@ -11,6 +11,7 @@ from fastapi.responses import JSONResponse, StreamingResponse
 from pydantic import BaseModel
 
 from app.lib.agent_runtime import run_agent
+from app.lib.capture_intent import score_capture_intent
 from app.lib.db import get_conn
 
 router = APIRouter()
@@ -27,6 +28,16 @@ async def query_agent(req: AgentQueryRequest):
         try:
             async for event in run_agent(req.question, session_id=req.session_id):
                 yield json.dumps(event, ensure_ascii=False) + "\n"
+            # After the agent run completes, emit a hint signal telling the
+            # client whether the question itself carries enough reflection
+            # that it might be worth offering the user a "save as entry"
+            # follow-up. Pure judgment — clients decide how (or whether) to
+            # render it. Heuristic in app/lib/capture_intent.py.
+            hint = score_capture_intent(req.question)
+            yield json.dumps(
+                {"type": "suggest_capture", **hint},
+                ensure_ascii=False,
+            ) + "\n"
         except Exception as exc:
             yield json.dumps(
                 {"type": "error", "message": str(exc), "where": "stream"},

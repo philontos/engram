@@ -6,45 +6,129 @@
 
 Most AI tools answer your question. Engram answers *you*.
 
-It quietly builds a model of how you think — your values, fears, recurring patterns, the contradictions you can't see from the inside. Then any AI you connect (Claude, Cursor, Codex…) stops being a smart stranger and starts being something closer to a coach who's known you for years.
+It quietly builds a model of how you think — your values, fears, recurring patterns, the contradictions you can't see from the inside. Then any AI you connect (Claude, Cursor, Codex…) stops being a smart stranger and starts being something closer to a coach who has known you for years.
 
 Not a notes app. Not a memory layer. A **personal cognitive mirror** — built to surface the blind spots that hold you back, and the breakthroughs you didn't know were already in you.
 
 ---
 
-### A glimpse of what that feels like
+## A glimpse of what that feels like
 
-> **You:** I'm always timid. Back in school my girlfriend once joked "I'll kill you" and I froze. I keep catastrophizing — why?
->
-> **Engram:** This isn't timidity. It's a conditioned fear loop traced back to a specific childhood pattern in your records — the one where a close caregiver's pressure could freeze a room in seconds. Three reinforcers compound it:
->
-> - Defensive-pessimism mechanism (**strength = 0.92**, the strongest node in your map) — you pre-emptively brace for the worst so reality can't blindside you. The cost: you live inside "something bad is about to happen."
-> - High **neuroticism (84)** + strong **prevention-focus (84)** — your brain scans the environment for threat signals, not safety signals.
-> - Old loop generalized — your wife's frustration, a joke from a partner, public speaking… all trigger the same childhood template.
->
-> You already have the antidotes inside your own map (cognitive defusion 0.78, cognitive reframing 0.81). They're just not loaded yet. Four moves: defuse ("I notice fear is showing up" — not "I'm afraid"); three-column reframe; small exposure experiments to feed the brain new data; externalize ("I have a fear loop, can you say it differently?") instead of "I have a problem."
->
-> The fear is a survival strategy from a child who needed it. That child is gone. Your brain just hasn't gotten the memo — only action sends the new signal.
+Same model under the hood — two different lenses, personal and professional.
 
-No other memory tool can produce this answer, because no other memory tool has a model of you to reason from.
+### Personal
+
+> **You:** I keep saying yes when I want to say no — then I resent it. Why?
+>
+> **Engram:** This isn't a willpower problem. Three forces in your map are pulling at the same time:
+>
+> - Approval-seeking pattern (**strength 0.86**, your second-strongest node) — you read disapproval as danger before the sentence is even finished.
+> - High **agreeableness (78)** + low **assertiveness (32)** — your default reflex is "smooth it over," not "hold the line."
+> - Schwartz **conformity** ranks above **self-direction** — you genuinely value harmony, but the bill comes out of your own time.
+>
+> The antidote is already in your records: three weeks ago you wrote about "earning the right to disappoint people." That phrasing is the move you already trust. Two practices: a 24-hour pause on any non-urgent yes; one weekly small no to retrain the loop.
+>
+> Saying yes was protective once — kept you safe in rooms where disagreement was costly. That room isn't this one.
+
+### Work
+
+> **You:** I have two offers — bigger title at the safe company, smaller title at the risky startup. I keep flip-flopping. What am I missing?
+>
+> **Engram:** You're not flip-flopping — you're stuck because the question is mis-framed. Your map says it cleanly:
+>
+> - Schwartz **self-direction (88)** ranks #1, **security (61)** ranks #5 — when you imagine the safe role, the part of you that picks reads as muted, not satisfied.
+> - **Openness (78)** + **INTJ N-axis (72)** — you metabolize uncertainty as input, not threat. The "risky" frame is borrowed, not yours.
+> - "Optionality over title" appears 4× in your records this year (strength 0.74, growing). The conviction is already there.
+> - But: **prevention-focus (84)** is loud. It will keep generating "what if it fails" until you give it a concrete fallback plan, not a reassurance.
+>
+> The decision isn't "safe vs risky." It's "do I trust my own pattern, or do I need a 6-month financial floor first to silence prevention-focus enough to choose freely?" Build the floor — the choice answers itself in an afternoon.
+>
+> The flip-flopping isn't indecision. It's prevention-focus and self-direction arguing without a referee. Give them a shared budget.
+
+No other memory tool can produce these answers, because no other memory tool has a model of *you* to reason from.
 
 ---
 
-**Engram is not a notes app.** Don't use it to log what you ate for lunch. Use it when you catch yourself thinking, doubting, deciding, realizing. Pure factual logs are politely declined at the gate.
+## What that model actually looks like
+
+![Cognitive graph — hundreds of nodes and edges grown from a few weeks of reflections](docs/screenshot-graph-en.png)
+
+> *Each node is a concept, value, or recurring pattern. Edges encode similarity, support, opposition, derivation. Colors map to domains (psychology / philosophy / business / …). Click any node to expand its neighborhood.*
+
+This isn't a search index — it's a model. Below is the structured snapshot Engram reasons over when you ask it anything:
+
+```
+┌─────────────────────────────────────────────────────────┐
+│  PROFILE — built from 40 reflections · 389 graph nodes  │
+├─────────────────────────────────────────────────────────┤
+│  OCEAN                                                  │
+│   Openness          ████████░░  78                      │
+│   Conscientiousness █████████░  86                      │
+│   Extraversion      ████░░░░░░  41                      │
+│   Agreeableness     ███████░░░  72                      │
+│   Neuroticism       ████████░░  75                      │
+├─────────────────────────────────────────────────────────┤
+│  MBTI · INTJ                                            │
+│   I 64 / E 36     N 72 / S 28                           │
+│   T 81 / F 19     J 67 / P 33                           │
+├─────────────────────────────────────────────────────────┤
+│  Top Schwartz values                                    │
+│   Self-direction   ●●●●●○                               │
+│   Achievement      ●●●●○○                               │
+│   Benevolence      ●●●○○○                               │
+├─────────────────────────────────────────────────────────┤
+│  Recurring patterns (graph nodes by strength)           │
+│   Defensive pessimism      0.92  ▲ growing              │
+│   Cognitive reframing      0.81  ↔ stable               │
+│   Approval-seeking         0.78  ▼ decreasing           │
+└─────────────────────────────────────────────────────────┘
+```
+
+And it changes over time:
+
+![Profile evolution — weeks of dimension drift across MBTI, OCEAN, regulatory focus, and Schwartz values](docs/screenshot-profile-evolution-en.png)
+
+> *You can watch yourself becoming someone else.*
+
+When you ask Engram *"why am I like this?"*, this — graph + profile + evolution — is the model it reasons over. Not "here are 12 notes you wrote." A coherent read on who you tend to be, with every score traceable to where it came from.
+
+---
+
+## Make the mirror your own
+
+The dimensions above (OCEAN / MBTI / Schwartz / 6 default backbones — psychology, philosophy, business, science, history, technology) are starting points, not the system. **Engram's dimension config is just a folder of YAML and prompt templates** — drop a directory in, restart, and the dimension is alive.
+
+```
+Default backbones                    Your custom backbones
+─────────────────                    ──────────────────────
+psychology     ●●●●●○                creative_energy_curve   (artist)
+philosophy     ●●●●○○                decision_consistency    (founder)
+business       ●●●○○○                empathy_cost            (parent)
+science        ●●○○○○                attention_depth         (researcher)
+history        ●●○○○○                ...
+technology     ●●●○○○
+```
+
+Every new dimension is a new lens the model reasons through. **Your mirror, your axes.** See *Adding a dimension* below for the 3-file recipe.
+
+---
+
+> **Engram is not a notes app.** Don't use it to log what you ate for lunch. Use it when you catch yourself thinking, doubting, deciding, realizing. Pure factual logs are politely declined at the gate.
 
 ---
 
 ## Why Engram is different
 
-Most AI memory systems are retrieval layers: store text, search text. Engram builds a model of *you*.
+Most AI memory layers are retrieval-focused: store text, search text. Engram builds a model of *you*.
 
-| Feature | Engram | mem0 / Letta / Zep |
-|---------|--------|-------------------|
-| Personality profiling (OCEAN + Schwartz values) | ✅ | ❌ |
+| Feature | Engram | Typical memory layers |
+|---------|--------|-----------------------|
+| Personality profiling (OCEAN + MBTI + Schwartz values) | ✅ | ❌ |
 | Knowledge graph with time-decay | ✅ | ❌ |
 | Per-entry situational context analysis | ✅ | ❌ |
 | Precision LIFO revert (rollback graph state) | ✅ | ❌ |
-| Extensible dimension system | ✅ | ❌ |
+| Extensible dimension system (YAML-defined) | ✅ | ❌ |
+| Custom backbones per domain | ✅ | ❌ |
 | MCP compatible (Claude Code, Cursor, etc.) | ✅ | partial |
 
 ---
@@ -56,7 +140,7 @@ A thought you typed / spoke / messaged
          ↓
    [ capture ]          Intent gate accepts thoughts; rejects pure event logs
          ↓
-   [ slice pipeline ]   Extract OCEAN, Schwartz values, situational context
+   [ slice pipeline ]   Extract OCEAN / MBTI / Schwartz / situational context
          ↓
    [ backbone graph ]   Build knowledge nodes + edges, apply time-decay
          ↓
@@ -294,4 +378,6 @@ The dimension is auto-discovered on next startup. No code changes required.
 
 ## License
 
-MIT
+**AGPL-3.0-or-later.** See [`LICENSE`](LICENSE) for the full text.
+
+In short: free for personal and self-hosted use, forever. If you deploy a modified version as a network service, you must offer users access to your modified source code (AGPL §13). Bundling with proprietary code requires a commercial license — see [`LICENSING.md`](LICENSING.md).

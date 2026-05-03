@@ -2,11 +2,13 @@ import React, { useState, useRef, useEffect } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchQueryLogs, fetchQueryLog, clearQueryLogs, deleteQueryLog } from '@/api'
 import type { QueryLogDetail, QueryTurn, ToolCallTrace, ThemeRecall } from '@/types'
-import { getDomainColor, getDomainLabel } from '@/lib/constants'
+import { getDomainLabel } from '@/lib/constants'
+import { useDomainColor } from '@/lib/theme'
 import { useBackbones } from '@/lib/useBackbones'
 import { useI18n } from '@/i18n'
 import { fmtTime } from '@/lib/utils'
 import { Send, Square, Trash2, Clock, MessageSquarePlus } from 'lucide-react'
+import { Logo } from '@/components/ui/Logo'
 import { useConfirm } from '@/components/ui/ConfirmDialog'
 
 type NodeDetail = { id: number; label: string; domain: string; origin: string; strength: number; sim?: number | null; description?: string }
@@ -80,28 +82,36 @@ const TOOL_LABEL_KEYS: Record<string, string> = {
   web_search:            'query.tool_web_search',
 }
 
+// Tool color groups — Morandi-mapped semantically:
+//   recall*  → sage      (retrieval / grounded)
+//   graph*   → mauve     (primary brand / thinking)
+//   opposites/blindspots → rust  (contrarian / critical)
+//   bridges/paths → plum   (connections / emotional depth)
+//   persona/web   → mustard (external / distinctive)
+//   history       → slate (looking back / cool)
 const TOOL_COLORS: Record<string, string> = {
-  recall_raw:            '#10b981',
-  recall_raw_by_node:    '#10b981',
-  search_graph:          '#6366f1',
-  expand_node:           '#6366f1',
-  get_node_neighborhood: '#6366f1',
-  get_opposites:         '#f87171',
-  compare_nodes:         '#f87171',
-  list_blindspots:       '#f87171',
-  list_bridges:          '#a78bfa',
-  find_evolution_paths:  '#a78bfa',
-  get_persona_lens:      '#f59e0b',
-  recall_history_answer:      '#0ea5e9',
-  recall_history_tools:       '#0ea5e9',
-  recall_history_tool_detail: '#0ea5e9',
-  web_search:            '#f59e0b',
+  recall_raw:            'var(--engram-accent-success)',
+  recall_raw_by_node:    'var(--engram-accent-success)',
+  search_graph:          'var(--engram-accent-primary)',
+  expand_node:           'var(--engram-accent-primary)',
+  get_node_neighborhood: 'var(--engram-accent-primary)',
+  get_opposites:         'var(--engram-accent-warning)',
+  compare_nodes:         'var(--engram-accent-warning)',
+  list_blindspots:       'var(--engram-accent-warning)',
+  list_bridges:          'var(--engram-accent-emotion)',
+  find_evolution_paths:  'var(--engram-accent-emotion)',
+  get_persona_lens:      'var(--engram-accent-strength)',
+  recall_history_answer:      'var(--engram-accent-secondary)',
+  recall_history_tools:       'var(--engram-accent-secondary)',
+  recall_history_tool_detail: 'var(--engram-accent-secondary)',
+  web_search:            'var(--engram-accent-strength)',
 }
 
 
-export function QueryTab() {
+export function QueryTab({ active = true }: { active?: boolean } = {}) {
   const qc = useQueryClient()
   const { backbones } = useBackbones()
+  const colorOf = useDomainColor()
   const { t } = useI18n()
   const [question, setQuestion] = useState('')
   const [streaming, setStreaming] = useState(false)
@@ -113,13 +123,24 @@ export function QueryTab() {
   const [error, setError]           = useState('')
   const [selectedLogId, setSelectedLogId] = useState<number | null>(null)
 
-  // logs 加载后默认选中第一条
-  const logsInitialized = useRef(false)
 
   useEffect(() => { saveSession(SESSION_KEY_TURNS, turns) }, [turns])
   useEffect(() => { saveSession(SESSION_KEY_BASE, baseLog) }, [baseLog])
   useEffect(() => { saveSession(SESSION_KEY_SID, currentSessionId) }, [currentSessionId])
   useEffect(() => { saveSession(SESSION_KEY_LID, currentLogId) }, [currentLogId])
+
+  // Switching INTO Insight defaults to a fresh chat (logo state). Two exceptions:
+  //   1. user has manually picked an existing log from history (selectedLogId)
+  //   2. a stream is in flight — never interrupt
+  const prevActiveRef = useRef(active)
+  useEffect(() => {
+    const wasActive = prevActiveRef.current
+    prevActiveRef.current = active
+    if (!active || wasActive) return
+    if (selectedLogId !== null) return
+    if (streaming) return
+    setTurns([]); setBaseLog(null); setCurrentSessionId(null); setCurrentLogId(null); setError(''); clearSession()
+  }, [active, selectedLogId, streaming])
   const abortRef = useRef<AbortController | null>(null)
   const pendingQueueRef = useRef<QueuedQuery[]>([])
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -185,14 +206,6 @@ export function QueryTab() {
     refetchOnMount: true,
   })
   const logs = logsData?.logs ?? []
-
-  // 首次加载后默认选中第一条历史记录
-  useEffect(() => {
-    if (!logsInitialized.current && logs.length > 0) {
-      logsInitialized.current = true
-      setSelectedLogId(logs[0].id)
-    }
-  }, [logs])
 
   const { data: logDetail } = useQuery({
     queryKey: ['query-log', selectedLogId],
@@ -375,7 +388,7 @@ export function QueryTab() {
         {/* Conversation thread */}
         <div style={{ flex: 1, overflowY: 'auto', padding: '24px 28px' }}>
           {error && (
-            <div style={{ padding: '12px 16px', borderRadius: 10, marginBottom: 16, background: 'rgba(248,113,113,0.1)', border: '1px solid rgba(248,113,113,0.2)', color: '#f87171', fontSize: 12 }}>
+            <div style={{ padding: '12px 16px', borderRadius: 10, marginBottom: 16, background: 'var(--engram-tint-warning)', border: '1px solid var(--engram-accent-warning)', color: 'var(--engram-accent-warning)', fontSize: 12 }}>
               {error}
             </div>
           )}
@@ -387,11 +400,10 @@ export function QueryTab() {
             </div>
           )}
 
-          {/* 空状态 */}
+          {/* 空状态 — hero wordmark */}
           {!showConversation && !error && !showHistoryDetail && (
-            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60%', color: 'var(--text3)', gap: 10 }}>
-              <Send size={28} strokeWidth={1.5} />
-              <span style={{ fontSize: 13 }}>{t('query.empty_hint')}</span>
+            <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60%', gap: 28, color: 'var(--engram-text-primary)' }}>
+              <Logo size="hero" tagline={t('query.empty_hint')} />
             </div>
           )}
 
@@ -512,8 +524,8 @@ export function QueryTab() {
                 style={{
                   position: 'absolute', right: 8, bottom: 8,
                   width: 32, height: 32, borderRadius: 8, border: 'none', cursor: 'pointer',
-                  background: streaming ? 'rgba(248,113,113,0.15)' : 'var(--accent)',
-                  color: streaming ? '#f87171' : '#fff',
+                  background: streaming ? 'var(--engram-tint-warning)' : 'var(--accent)',
+                  color: streaming ? 'var(--engram-accent-warning)' : 'var(--engram-bg-canvas)',
                   display: 'flex', alignItems: 'center', justifyContent: 'center',
                   opacity: (!question.trim() && !streaming) ? 0.4 : 1,
                 }}>
@@ -536,7 +548,7 @@ export function QueryTab() {
               display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6,
               width: '100%', padding: '10px 16px', border: 'none', borderBottom: '1px solid var(--border)',
               background: 'var(--accent)', cursor: 'pointer',
-              fontSize: 12, fontWeight: 600, color: '#fff',
+              fontSize: 12, fontWeight: 600, color: 'var(--engram-bg-canvas)',
             }}
           >
             <MessageSquarePlus size={13} /> {t('query.new_chat')}
@@ -557,7 +569,7 @@ export function QueryTab() {
         {streaming && selectedLogId !== null && (
           <div
             onClick={() => setSelectedLogId(null)}
-            style={{ cursor: 'pointer', padding: '8px 16px', background: 'rgba(99,102,241,0.1)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--accent2)', flexShrink: 0 }}
+            style={{ cursor: 'pointer', padding: '8px 16px', background: 'var(--engram-tint-primary)', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: 'var(--accent2)', flexShrink: 0 }}
           >
             <span className="animate-pulse">●</span> {t('query.streaming_back')}
           </div>
@@ -583,16 +595,16 @@ export function QueryTab() {
                 style={{
                   position: 'relative', padding: '12px 16px', cursor: 'pointer',
                   borderBottom: '1px solid var(--border)',
-                  background: active ? 'rgba(99,102,241,0.13)' : 'transparent',
+                  background: active ? 'var(--engram-tint-primary)' : 'transparent',
                   borderLeft: active ? '3px solid var(--accent)' : '3px solid transparent',
                   transition: 'background 0.15s, border-color 0.15s',
-                  boxShadow: active ? 'inset 0 1px 0 rgba(99,102,241,0.15), inset 0 -1px 0 rgba(99,102,241,0.15)' : 'none',
+                  boxShadow: active ? 'inset 0 1px 0 var(--engram-tint-primary), inset 0 -1px 0 var(--engram-tint-primary)' : 'none',
                 }}>
                 <div style={{ paddingRight: 24 }}>
                   <div className="line-clamp-2" style={{ fontSize: 12, color: active ? 'var(--text)' : 'var(--text)', fontWeight: active ? 500 : 400, lineHeight: 1.5, marginBottom: 6 }}>{log.question}</div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: log.seeds.length ? 6 : 0 }}>
-                    <span className="badge" style={{ background: 'rgba(99,102,241,0.12)', color: 'var(--accent2)' }}>{log.mode}</span>
-                    {log.turn_count > 1 && <span className="badge" style={{ background: 'rgba(16,185,129,0.12)', color: '#10b981' }}>{t('query.turns_n', { n: log.turn_count })}</span>}
+                    <span className="badge" style={{ background: 'var(--engram-tint-primary)', color: 'var(--accent2)' }}>{log.mode}</span>
+                    {log.turn_count > 1 && <span className="badge" style={{ background: 'var(--engram-tint-success)', color: 'var(--engram-accent-success)' }}>{t('query.turns_n', { n: log.turn_count })}</span>}
                     {log.id === currentLogId && streaming && (
                       <span className="animate-pulse" style={{ color: 'var(--accent)', fontSize: 10, lineHeight: 1 }}>●</span>
                     )}
@@ -601,7 +613,7 @@ export function QueryTab() {
                   {log.seeds.length > 0 && (
                     <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
                       {log.seeds.slice(0, 4).map((s, i) => {
-                        const color = getDomainColor(s.domain, backbones)
+                        const color = colorOf(s.domain, backbones)
                         return <span key={i} className="chip" style={{ background: color + '22', color, fontSize: 10 }}>{s.label}</span>
                       })}
                     </div>
@@ -759,7 +771,7 @@ function AgentToolCallRow({ tc }: { tc: AgentToolCall }) {
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const label = TOOL_LABEL_KEYS[tc.tool] ? t(TOOL_LABEL_KEYS[tc.tool] as Parameters<typeof t>[0]) : tc.tool
-  const color = TOOL_COLORS[tc.tool] || '#94a3b8'
+  const color = TOOL_COLORS[tc.tool] || 'var(--engram-accent-secondary)'
   const argText = Object.entries(tc.args)
     .map(([k, v]) => `${k}=${typeof v === 'string' ? `"${v}"` : JSON.stringify(v)}`)
     .join(', ')
@@ -802,6 +814,7 @@ function AgentToolCallRow({ tc }: { tc: AgentToolCall }) {
 
 function ToolDetailRender({ detail }: { detail: ToolCallDetail }) {
   const { backbones } = useBackbones()
+  const colorOf = useDomainColor()
   const { lang, t } = useI18n()
   const nodes = (detail.nodes as NodeDetail[] | undefined) || []
   const edges = (detail.edges as EdgeDetail[] | undefined) || []
@@ -822,7 +835,7 @@ function ToolDetailRender({ detail }: { detail: ToolCallDetail }) {
           <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{t('query.nodes')}</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
             {allNodes.map((n, i) => {
-              const color = getDomainColor(n.domain, backbones)
+              const color = colorOf(n.domain, backbones)
               return (
                 <div key={i} style={{ padding: '6px 8px', borderRadius: 6, background: 'var(--surface2)' }}>
                   <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
@@ -1174,10 +1187,10 @@ function LogDetailView({ log }: { log: QueryLogDetail }) {
 }
 
 const TRACE_TOOL_META: Record<string, { labelKey: string; color: string }> = {
-  graph_search:  { labelKey: 'query.tool_label_search',   color: '#6366f1' },
-  expand_node:   { labelKey: 'query.tool_label_expand',   color: '#10b981' },
-  get_opposites: { labelKey: 'query.tool_label_opposite', color: '#f87171' },
-  web_search:    { labelKey: 'query.tool_label_web',      color: '#f59e0b' },
+  graph_search:  { labelKey: 'query.tool_label_search',   color: 'var(--engram-accent-primary)' },
+  expand_node:   { labelKey: 'query.tool_label_expand',   color: 'var(--engram-accent-success)' },
+  get_opposites: { labelKey: 'query.tool_label_opposite', color: 'var(--engram-accent-warning)' },
+  web_search:    { labelKey: 'query.tool_label_web',      color: 'var(--engram-accent-strength)' },
 }
 
 function ToolTraceBlock({ calls }: { calls: ToolCallTrace[] }) {
@@ -1199,7 +1212,7 @@ function ToolTraceBlock({ calls }: { calls: ToolCallTrace[] }) {
           {calls.map((c, i) => {
             const meta = TRACE_TOOL_META[c.tool]
             const label = meta ? t(meta.labelKey as Parameters<typeof t>[0]) : c.tool
-            const color = meta ? meta.color : '#94a3b8'
+            const color = meta ? meta.color : 'var(--engram-accent-secondary)'
             const argText = Object.entries(c.args || {})
               .map(([k, v]) => `${k}=${typeof v === 'string' ? `"${v}"` : JSON.stringify(v)}`)
               .join(', ')
@@ -1238,6 +1251,7 @@ function ToolTraceBlock({ calls }: { calls: ToolCallTrace[] }) {
 
 function ThemeRecallBlock({ items }: { items: ThemeRecall[] }) {
   const { backbones } = useBackbones()
+  const colorOf = useDomainColor()
   const { t } = useI18n()
   const [open, setOpen] = useState(false)
   const totalEntries = items.reduce((s, t) => s + t.entries.length, 0)
@@ -1255,7 +1269,7 @@ function ThemeRecallBlock({ items }: { items: ThemeRecall[] }) {
       {open && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
           {items.map((t, i) => {
-            const color = getDomainColor(t.node_domain, backbones)
+            const color = colorOf(t.node_domain, backbones)
             return (
               <div key={i} style={{
                 padding: '10px 12px', borderRadius: 8,

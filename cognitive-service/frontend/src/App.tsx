@@ -10,21 +10,23 @@ import { Network, BookOpen, UserCircle2, Search, Settings, Download, Upload, Zap
 import { useConfirm } from '@/components/ui/ConfirmDialog'
 import { useI18n, type TKey } from '@/i18n'
 import { LangSwitcher } from '@/components/ui/LangSwitcher'
+import { ThemeToggle } from '@/components/ui/ThemeToggle'
+import { Logo } from '@/components/ui/Logo'
 
 type Tab = 'graph' | 'entries' | 'profile' | 'query'
 
 const TABS: { id: Tab; labelKey: TKey; Icon: React.ElementType }[] = [
-  { id: 'graph',   labelKey: 'nav.graph',   Icon: Network     },
-  { id: 'entries', labelKey: 'nav.entries', Icon: BookOpen    },
-  { id: 'profile', labelKey: 'nav.profile', Icon: UserCircle2 },
   { id: 'query',   labelKey: 'nav.query',   Icon: Search      },
+  { id: 'profile', labelKey: 'nav.profile', Icon: UserCircle2 },
+  { id: 'entries', labelKey: 'nav.entries', Icon: BookOpen    },
+  { id: 'graph',   labelKey: 'nav.graph',   Icon: Network     },
 ]
 
 export default function App() {
   const qc      = useQueryClient()
   const confirm = useConfirm()
   const { t }   = useI18n()
-  const [tab, setTab]           = useState<Tab>('graph')
+  const [tab, setTab]           = useState<Tab>('query')
   const [adminOpen, setAdminOpen] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const [adminBusy, setAdminBusy]   = useState(false)
@@ -111,14 +113,18 @@ export default function App() {
   return (
     <div style={{ display: 'flex', width: '100%', height: '100%', overflow: 'hidden' }}>
 
-      {/* ── Left nav ────────────────────────────────────── */}
+      {/* ── Left nav (Morandi) ──────────────────────────── */}
       <nav style={{
-        width: 68, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center',
-        padding: '16px 0', background: 'var(--surface)', borderRight: '1px solid var(--border)',
+        width: 84, flexShrink: 0, display: 'flex', flexDirection: 'column', alignItems: 'center',
+        padding: '16px 0',
+        background: 'var(--engram-bg-surface)',
+        borderRight: '1px solid var(--engram-border-subtle)',
         position: 'relative', zIndex: 20,
       }}>
         {/* Logo */}
-        <div style={{ fontSize: 20, marginBottom: 20, userSelect: 'none' }}>🧠</div>
+        <div style={{ marginBottom: 20, color: 'var(--engram-text-primary)', userSelect: 'none' }}>
+          <Logo variant="mark" size="md" />
+        </div>
 
         {/* Nav items */}
         <div style={{ display: 'flex', flexDirection: 'column', gap: 4, width: '100%', padding: '0 8px' }}>
@@ -128,18 +134,22 @@ export default function App() {
               <button key={id} onClick={() => setTab(id)}
                 style={{
                   display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-                  padding: '10px 0', borderRadius: 10, width: '100%', cursor: 'pointer',
-                  border: 'none', position: 'relative', transition: 'all 0.12s',
-                  background: active ? 'rgba(99,102,241,0.15)' : 'transparent',
-                  color: active ? 'var(--accent2)' : 'var(--text3)',
+                  padding: '10px 0',
+                  borderRadius: 'var(--engram-radius-md)',
+                  width: '100%', cursor: 'pointer',
+                  border: 'none', position: 'relative',
+                  transition: 'background var(--engram-transition), color var(--engram-transition)',
+                  background: active ? 'var(--engram-tint-primary)' : 'transparent',
+                  color: active ? 'var(--engram-accent-primary)' : 'var(--engram-text-muted)',
                 }}>
                 {active && (
                   <span style={{
                     position: 'absolute', left: 0, top: 8, bottom: 8,
-                    width: 3, borderRadius: '0 3px 3px 0', background: 'var(--accent)',
+                    width: 2, borderRadius: '0 2px 2px 0',
+                    background: 'var(--engram-accent-primary)',
                   }} />
                 )}
-                <Icon size={17} strokeWidth={active ? 2.2 : 1.7} />
+                <Icon size={17} strokeWidth={active ? 2 : 1.6} />
                 <span style={{ fontSize: 10, fontWeight: active ? 600 : 400, letterSpacing: '0.02em' }}>{t(labelKey)}</span>
               </button>
             )
@@ -153,15 +163,23 @@ export default function App() {
           <div style={{
             display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6,
             marginBottom: 12, padding: '10px 8px',
-            borderRadius: 10, background: 'var(--surface2)', width: 'calc(100% - 16px)',
+            borderRadius: 'var(--engram-radius-md)',
+            background: 'var(--engram-bg-elevated)',
+            border: '1px solid var(--engram-border-subtle)',
+            width: 'calc(100% - 16px)',
           }}>
             <StatBit label={t('stats.entries')} value={stats.entries} />
-            <div style={{ width: '100%', height: 1, background: 'var(--border)' }} />
+            <div style={{ width: '100%', height: 1, background: 'var(--engram-border-subtle)' }} />
             <StatBit label={t('stats.nodes')} value={stats.nodes} />
-            <div style={{ width: '100%', height: 1, background: 'var(--border)' }} />
+            <div style={{ width: '100%', height: 1, background: 'var(--engram-border-subtle)' }} />
             <StatBit label={t('stats.edges')} value={stats.edges} />
           </div>
         )}
+
+        {/* Theme toggle */}
+        <div style={{ width: '100%', padding: '0 8px', marginBottom: 4 }}>
+          <ThemeToggle />
+        </div>
 
         {/* Language switcher */}
         <div style={{ width: '100%', padding: '0 8px', marginBottom: 4 }}>
@@ -173,12 +191,15 @@ export default function App() {
           <button onClick={() => setAdminOpen(v => !v)}
             style={{
               display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 4,
-              padding: '10px 0', borderRadius: 10, width: '100%', cursor: 'pointer',
-              border: 'none', transition: 'all 0.12s',
-              background: adminOpen ? 'rgba(99,102,241,0.15)' : 'transparent',
-              color: adminOpen ? 'var(--accent2)' : 'var(--text3)',
+              padding: '10px 0',
+              borderRadius: 'var(--engram-radius-md)',
+              width: '100%', cursor: 'pointer',
+              border: 'none',
+              transition: 'background var(--engram-transition), color var(--engram-transition)',
+              background: adminOpen ? 'var(--engram-tint-primary)' : 'transparent',
+              color: adminOpen ? 'var(--engram-accent-primary)' : 'var(--engram-text-muted)',
             }}>
-            <Settings size={17} strokeWidth={1.7} />
+            <Settings size={17} strokeWidth={1.6} />
             <span style={{ fontSize: 10 }}>{t('nav.admin')}</span>
           </button>
 
@@ -216,7 +237,7 @@ export default function App() {
           <div className={tab === 'graph'   ? 'h-full' : 'hidden'}><GraphTab active={tab === 'graph'} /></div>
           <div className={tab === 'entries' ? 'h-full' : 'hidden'}><EntriesTab /></div>
           <div className={tab === 'profile' ? 'h-full' : 'hidden'}><ProfileTab /></div>
-          <div className={tab === 'query'   ? 'h-full' : 'hidden'}><QueryTab /></div>
+          <div className={tab === 'query'   ? 'h-full' : 'hidden'}><QueryTab active={tab === 'query'} /></div>
         </div>
       </div>
     </div>
@@ -226,8 +247,8 @@ export default function App() {
 function StatBit({ label, value }: { label: string; value: number }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 1 }}>
-      <span style={{ fontSize: 14, fontWeight: 700, color: 'var(--text2)', lineHeight: 1 }}>{value}</span>
-      <span style={{ fontSize: 9, color: 'var(--text3)', letterSpacing: '0.04em' }}>{label}</span>
+      <span style={{ fontSize: 14, fontWeight: 600, color: 'var(--engram-text-secondary)', lineHeight: 1 }}>{value}</span>
+      <span style={{ fontSize: 9, color: 'var(--engram-text-muted)', letterSpacing: '0.04em' }}>{label}</span>
     </div>
   )
 }
@@ -288,8 +309,8 @@ function ImportModal({ onImport, onClose }: { onImport: (text: string) => Promis
             <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
               <span style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>{t('import.paste_json')}</span>
               {pasteText.trim() && (() => {
-                try { JSON.parse(pasteText); return <span style={{ fontSize: 10, color: '#34d399', fontWeight: 600 }}>{t('import.valid')}</span> }
-                catch { return <span style={{ fontSize: 10, color: '#f87171', fontWeight: 600 }}>{t('import.invalid')}</span> }
+                try { JSON.parse(pasteText); return <span style={{ fontSize: 10, color: 'var(--engram-accent-success)', fontWeight: 600 }}>{t('import.valid')}</span> }
+                catch { return <span style={{ fontSize: 10, color: 'var(--engram-accent-warning)', fontWeight: 600 }}>{t('import.invalid')}</span> }
               })()}
             </div>
             <button onClick={handleFormat} disabled={!pasteText.trim()} style={{ fontSize: 11, padding: '2px 10px', borderRadius: 6, border: '1px solid var(--border2)', background: 'transparent', color: 'var(--text3)', cursor: pasteText.trim() ? 'pointer' : 'default', opacity: pasteText.trim() ? 1 : 0.4 }}>{t('import.format_button')}</button>
@@ -300,12 +321,12 @@ function ImportModal({ onImport, onClose }: { onImport: (text: string) => Promis
             placeholder={'[\n  { "id": 1, "raw": "...", "created_at": "..." },\n  ...\n]'}
             style={{
               width: '100%', height: 180, resize: 'vertical',
-              background: 'var(--surface2)', border: `1px solid ${error ? '#f87171' : 'var(--border2)'}`,
+              background: 'var(--surface2)', border: `1px solid ${error ? 'var(--engram-accent-warning)' : 'var(--border2)'}`,
               borderRadius: 8, color: 'var(--text)', fontFamily: 'monospace', fontSize: 11,
               padding: '10px 12px', outline: 'none', lineHeight: 1.6,
             }}
           />
-          {error && <div style={{ fontSize: 11, color: '#f87171', marginTop: 6 }}>{error}</div>}
+          {error && <div style={{ fontSize: 11, color: 'var(--engram-accent-warning)', marginTop: 6 }}>{error}</div>}
         </div>
 
         {/* Divider */}
@@ -345,12 +366,12 @@ function AdminMenuItem({ icon, label, onClick, disabled, danger }: {
       style={{
         display: 'flex', alignItems: 'center', gap: 10, width: '100%',
         padding: '8px 10px', borderRadius: 8, border: 'none', cursor: disabled ? 'default' : 'pointer',
-        background: hover && !disabled ? (danger ? 'rgba(248,113,113,0.08)' : 'var(--surface2)') : 'transparent',
-        color: danger ? '#f87171' : 'var(--text2)',
+        background: hover && !disabled ? (danger ? 'var(--engram-tint-warning)' : 'var(--surface2)') : 'transparent',
+        color: danger ? 'var(--engram-accent-warning)' : 'var(--text2)',
         fontSize: 12, opacity: disabled ? 0.4 : 1,
         transition: 'background 0.1s',
       }}>
-      <span style={{ color: danger ? '#f87171' : 'var(--text3)', flexShrink: 0, display: 'flex' }}>{icon}</span>
+      <span style={{ color: danger ? 'var(--engram-accent-warning)' : 'var(--text3)', flexShrink: 0, display: 'flex' }}>{icon}</span>
       {label}
     </button>
   )

@@ -10,22 +10,41 @@ import { Send, Square, Trash2, Clock, MessageSquarePlus } from 'lucide-react'
 import { useConfirm } from '@/components/ui/ConfirmDialog'
 
 type NodeDetail = { id: number; label: string; domain: string; origin: string; strength: number; sim?: number | null; description?: string }
-type EdgeDetail = { from_label: string; relation_type: string; to_label: string; weight: number }
-type ToolCallDetail = { nodes: NodeDetail[]; edges: EdgeDetail[] }
-type ToolCall = { round: number; tool: string; args: Record<string, unknown>; summary?: string; node_count?: number; detail?: ToolCallDetail }
-type ThemeEntry = { id: number; date: string; raw: string }
-type ThemeNode = { id: number; label: string; domain: string; node_type: string; origin: string; strength: number; description?: string }
-type ThemeResult = { node: ThemeNode; entries: ThemeEntry[]; analysis: string }
-type RawLinkedNode = { id: number; label: string; strength: number }
-type RawEntry = { id: number; date: string; raw: string; linked_nodes: RawLinkedNode[] }
-type StreamPhase = { stage: string; text: string; toolCalls?: ToolCall[]; themeResults?: ThemeResult[]; rawEntries?: RawEntry[]; rawTotalChars?: number; rawCandidatesRemaining?: number }
-type ConvTurn = { id: string; question: string; phases: StreamPhase[]; done: boolean; createdAt: number }
-type QueuedQuery = { question: string; mode: 'full' | 'fast'; sessionId: string | null }
+type EdgeDetail = { from_label: string; relation_type: string; to_label: string; weight: number; from_id?: number; to_id?: number }
+type ToolCallDetail = { nodes?: NodeDetail[]; edges?: EdgeDetail[]; [k: string]: unknown }
+type AgentToolCall = {
+  callId: string
+  round: number
+  tool: string
+  args: Record<string, unknown>
+  summary?: string
+  detail?: ToolCallDetail
+  latencyMs?: number
+}
+type AgentRound = {
+  round: number
+  thinking: string
+  toolCalls: AgentToolCall[]
+  finishReason?: string
+  hadToolCalls?: boolean
+}
+type ConvTurn = {
+  id: string
+  question: string
+  intent?: string
+  intentMessage?: string
+  rounds: AgentRound[]
+  finalRoundIndex?: number
+  done: boolean
+  createdAt: number
+}
+type QueuedQuery = { question: string; sessionId: string | null }
 
-const SESSION_KEY_TURNS   = 'query_turns'
-const SESSION_KEY_BASE    = 'query_base_log'
-const SESSION_KEY_SID     = 'query_session_id'
-const SESSION_KEY_LID     = 'query_log_id'
+// v2 — agent-mode shape; bump key so stale phase-based payloads do not hydrate.
+const SESSION_KEY_TURNS   = 'query_turns_v2'
+const SESSION_KEY_BASE    = 'query_base_log_v2'
+const SESSION_KEY_SID     = 'query_session_id_v2'
+const SESSION_KEY_LID     = 'query_log_id_v2'
 
 function loadSession<T>(key: string): T | null {
   try { const v = sessionStorage.getItem(key); return v ? JSON.parse(v) as T : null } catch { return null }
@@ -42,23 +61,41 @@ function clearSession() {
   } catch { /* ignore */ }
 }
 
-// Stage / tool label keys are resolved through i18n at render time.
-const STAGE_LABEL_KEYS: Record<string, string> = {
-  intent_check:      'query.stage_intent',
-  baseline:          'query.stage_baseline',
-  raw_recall:        'query.stage_raw_recall',
-  persona_blindspot: 'query.stage_persona',
-  graph_explore:     'query.stage_explore',
-  graph_insight:     'query.stage_synthesis',
+// Tool label keys (resolved through i18n at render time).
+const TOOL_LABEL_KEYS: Record<string, string> = {
+  recall_raw:            'query.tool_recall_raw',
+  recall_raw_by_node:    'query.tool_recall_raw_by_node',
+  search_graph:          'query.tool_search_graph',
+  expand_node:           'query.tool_expand_node',
+  get_node_neighborhood: 'query.tool_get_neighborhood',
+  get_opposites:         'query.tool_get_opposites',
+  compare_nodes:         'query.tool_compare_nodes',
+  list_blindspots:       'query.tool_list_blindspots',
+  list_bridges:          'query.tool_list_bridges',
+  find_evolution_paths:  'query.tool_find_paths',
+  get_persona_lens:      'query.tool_persona_lens',
+  recall_history_answer:      'query.tool_history_answer',
+  recall_history_tools:       'query.tool_history_tools',
+  recall_history_tool_detail: 'query.tool_history_tool_detail',
+  web_search:            'query.tool_web_search',
 }
 
-const INLINE_STAGES = new Set(['intent_check'])
-
-const TOOL_LABEL_KEYS: Record<string, string> = {
-  graph_search:  'query.tool_graph_search',
-  expand_node:   'query.tool_expand_node',
-  get_opposites: 'query.tool_get_opposites',
-  web_search:    'query.tool_web_search',
+const TOOL_COLORS: Record<string, string> = {
+  recall_raw:            '#10b981',
+  recall_raw_by_node:    '#10b981',
+  search_graph:          '#6366f1',
+  expand_node:           '#6366f1',
+  get_node_neighborhood: '#6366f1',
+  get_opposites:         '#f87171',
+  compare_nodes:         '#f87171',
+  list_blindspots:       '#f87171',
+  list_bridges:          '#a78bfa',
+  find_evolution_paths:  '#a78bfa',
+  get_persona_lens:      '#f59e0b',
+  recall_history_answer:      '#0ea5e9',
+  recall_history_tools:       '#0ea5e9',
+  recall_history_tool_detail: '#0ea5e9',
+  web_search:            '#f59e0b',
 }
 
 
@@ -67,7 +104,6 @@ export function QueryTab() {
   const { backbones } = useBackbones()
   const { t } = useI18n()
   const [question, setQuestion] = useState('')
-  const [mode, setMode]         = useState<'full' | 'fast'>('full')
   const [streaming, setStreaming] = useState(false)
   const [queueLength, setQueueLength] = useState(0)
   const [turns, setTurns]           = useState<ConvTurn[]>(() => (loadSession<ConvTurn[]>(SESSION_KEY_TURNS) ?? []).map((t, i) => ({ ...t, id: t.id ?? String(i), done: true })))
@@ -89,50 +125,45 @@ export function QueryTab() {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
 
-  // 打字机效果：用 ref 存完整文本，interval 每帧推进 cursor
+  // Typewriter for the final-answer round only (rounds 0..N-1 are intermediate
+  // thinking and render fully as they arrive, since they're collapsed).
   const CHARS_PER_TICK = 3
-  const displayCursors = useRef<Map<string, number>>(new Map())
+  const finalAnswerCursors = useRef<Map<string, number>>(new Map())
   const turnsRef = useRef<ConvTurn[]>(turns)
   const [, forceRender] = useState(0)
 
-  // 初始化时把已完成的 turns cursor 直接设到末尾，避免历史记录重放打字机
   useEffect(() => {
-    turns.forEach((turn, ti) => {
+    turns.forEach(turn => {
       if (!turn.done) return
-      turn.phases.forEach((phase, pi) => {
-        if (!phase.text) return
-        displayCursors.current.set(`${ti}-${pi}`, phase.text.length)
-      })
+      const text = finalAnswerText(turn)
+      if (text) finalAnswerCursors.current.set(turn.id, text.length)
     })
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 同步 turnsRef，避免 interval 闭包过期
   useEffect(() => { turnsRef.current = turns }, [turns])
 
-  // interval 只挂载一次，读 turnsRef 避免重建
   useEffect(() => {
     const id = setInterval(() => {
       let anyBehind = false
-      turnsRef.current.forEach((turn, ti) => {
-        turn.phases.forEach((phase, pi) => {
-          if (!phase.text) return
-          const key = `${ti}-${pi}`
-          const cur = displayCursors.current.get(key) ?? 0
-          if (cur < phase.text.length) {
-            anyBehind = true
-            displayCursors.current.set(key, Math.min(cur + CHARS_PER_TICK, phase.text.length))
-          }
-        })
+      turnsRef.current.forEach(turn => {
+        const text = finalAnswerText(turn)
+        if (!text) return
+        const cur = finalAnswerCursors.current.get(turn.id) ?? 0
+        if (cur < text.length) {
+          anyBehind = true
+          finalAnswerCursors.current.set(turn.id, Math.min(cur + CHARS_PER_TICK, text.length))
+        }
       })
       if (anyBehind) forceRender(n => n + 1)
     }, 16)
     return () => clearInterval(id)
-  }, []) // 只挂载一次
+  }, [])
 
-  function getDisplayText(ti: number, pi: number, fullText: string): string {
-    const key = `${ti}-${pi}`
-    const cur = displayCursors.current.get(key) ?? 0
-    return fullText.slice(0, cur)
+  function getFinalDisplay(turn: ConvTurn): string {
+    const text = finalAnswerText(turn)
+    if (!text) return ''
+    const cur = finalAnswerCursors.current.get(turn.id) ?? 0
+    return text.slice(0, cur)
   }
 
   function resizeTextarea() {
@@ -170,17 +201,19 @@ export function QueryTab() {
     staleTime: 0,
   })
 
-  async function runQueryInternal(q: string, qMode: 'full' | 'fast', sessionId: string | null) {
+  async function runQueryInternal(q: string, sessionId: string | null) {
     setStreaming(true); setError(''); setSelectedLogId(null)
 
     const newTurnId = String(Date.now()) + Math.random().toString(36).slice(2)
-    setTurns(prev => [...prev, { id: newTurnId, question: q, phases: [], done: false, createdAt: Date.now() }])
+    setTurns(prev => [...prev, {
+      id: newTurnId, question: q, rounds: [], done: false, createdAt: Date.now(),
+    }])
 
     abortRef.current = new AbortController()
     try {
-      const res = await fetch('/query', {
+      const res = await fetch('/query/agent', {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ question: q, mode: qMode, session_id: sessionId }),
+        body: JSON.stringify({ question: q, session_id: sessionId }),
         signal: abortRef.current.signal,
       })
       if (!res.ok) throw new Error(await res.text())
@@ -188,6 +221,15 @@ export function QueryTab() {
 
       function updateTurn(updater: (t: ConvTurn) => ConvTurn) {
         setTurns(prev => prev.map(t => t.id === newTurnId ? updater(t) : t))
+      }
+
+      function ensureRound(turn: ConvTurn, roundNum: number): ConvTurn {
+        if (turn.rounds.find(r => r.round === roundNum)) return turn
+        return { ...turn, rounds: [...turn.rounds, { round: roundNum, thinking: '', toolCalls: [] }] }
+      }
+
+      function patchRound(turn: ConvTurn, roundNum: number, patch: (r: AgentRound) => AgentRound): ConvTurn {
+        return { ...turn, rounds: turn.rounds.map(r => r.round === roundNum ? patch(r) : r) }
       }
 
       while (true) {
@@ -198,85 +240,85 @@ export function QueryTab() {
           if (!line.trim()) continue
           try {
             const evt = JSON.parse(line) as Record<string, unknown>
-            if (evt.type === 'error') {
+            const et = String(evt.type)
+
+            if (et === 'error') {
               setError(String(evt.message || t('query.err_unknown')))
-            } else if (evt.type === 'stage' && evt.status === 'start') {
-              updateTurn(t => ({ ...t, phases: [...t.phases, { stage: String(evt.stage || ''), text: '', toolCalls: [] }] }))
-            } else if (evt.type === 'stage' && evt.status === 'done' && evt.stage === 'raw_recall') {
-              const entries = (evt.entries as RawEntry[] | undefined) ?? []
-              updateTurn(t => {
-                if (!t.phases.length) return t
-                const ps = [...t.phases]; const last = { ...ps[ps.length - 1] }
-                last.rawEntries = entries
-                last.rawTotalChars = Number(evt.total_chars ?? 0)
-                last.rawCandidatesRemaining = Number(evt.candidates_remaining ?? 0)
-                ps[ps.length - 1] = last
-                return { ...t, phases: ps }
-              })
-            } else if (evt.type === 'delta') {
-              const chunk = String(evt.delta || ''); if (!chunk) continue
-              updateTurn(t => {
-                if (!t.phases.length) return { ...t, phases: [{ stage: '', text: chunk }] }
-                const ps = [...t.phases]; ps[ps.length - 1] = { ...ps[ps.length - 1], text: ps[ps.length - 1].text + chunk }
-                return { ...t, phases: ps }
-              })
-            } else if (evt.type === 'tool_call') {
-              const tc: ToolCall = { round: Number(evt.round), tool: String(evt.tool), args: (evt.args as Record<string, unknown>) || {} }
-              updateTurn(t => {
-                if (!t.phases.length) return t
-                const ps = [...t.phases]; const last = { ...ps[ps.length - 1] }
-                last.toolCalls = [...(last.toolCalls || []), tc]; ps[ps.length - 1] = last
-                return { ...t, phases: ps }
-              })
-            } else if (evt.type === 'tool_result') {
-              updateTurn(t => {
-                if (!t.phases.length) return t
-                const ps = [...t.phases]; const last = { ...ps[ps.length - 1] }
-                const tcs = [...(last.toolCalls || [])]
-                const idx = tcs.findLastIndex(tc => tc.tool === String(evt.tool) && tc.round === Number(evt.round) && !tc.summary)
-                if (idx !== -1) tcs[idx] = { ...tcs[idx], summary: String(evt.summary || ''), node_count: Number(evt.node_count ?? 0), detail: evt.detail as ToolCallDetail | undefined }
-                last.toolCalls = tcs; ps[ps.length - 1] = last
-                return { ...t, phases: ps }
-              })
-            } else if (evt.type === 'theme_result') {
-              const tr = evt as unknown as { type: string } & ThemeResult
-              updateTurn(t => {
-                if (!t.phases.length) return t
-                const ps = [...t.phases]; const last = { ...ps[ps.length - 1] }
-                last.themeResults = [...(last.themeResults || []), { node: tr.node, entries: tr.entries, analysis: tr.analysis }]
-                ps[ps.length - 1] = last
-                return { ...t, phases: ps }
-              })
-            } else if (evt.type === 'done' || evt.type === 'complete') {
+            } else if (et === 'agent_start') {
               if (evt.session_id) setCurrentSessionId(evt.session_id as string)
+            } else if (et === 'intent_check') {
+              const intent = String(evt.intent || 'proceed')
+              const message = String(evt.message || '')
+              updateTurn(t => ({ ...t, intent, intentMessage: message }))
+            } else if (et === 'round_start') {
+              const r = Number(evt.round)
+              updateTurn(t => ensureRound(t, r))
+            } else if (et === 'delta') {
+              const r = Number(evt.round)
+              const chunk = String(evt.delta || '')
+              if (!chunk) continue
+              updateTurn(t => {
+                const withRound = ensureRound(t, r)
+                return patchRound(withRound, r, rd => ({ ...rd, thinking: rd.thinking + chunk }))
+              })
+            } else if (et === 'tool_call') {
+              const r = Number(evt.round)
+              const tc: AgentToolCall = {
+                callId: String(evt.call_id || `${r}-${evt.tool}-${Math.random().toString(36).slice(2)}`),
+                round: r,
+                tool: String(evt.tool),
+                args: (evt.args as Record<string, unknown>) || {},
+              }
+              updateTurn(t => {
+                const withRound = ensureRound(t, r)
+                return patchRound(withRound, r, rd => ({ ...rd, toolCalls: [...rd.toolCalls, tc] }))
+              })
+            } else if (et === 'tool_result') {
+              const r = Number(evt.round)
+              const callId = String(evt.call_id || '')
+              updateTurn(t => patchRound(t, r, rd => ({
+                ...rd,
+                toolCalls: rd.toolCalls.map(tc => tc.callId === callId ? {
+                  ...tc,
+                  summary:   String(evt.summary || ''),
+                  detail:    (evt.detail as ToolCallDetail | undefined) || undefined,
+                  latencyMs: Number(evt.latency_ms ?? 0),
+                } : tc),
+              })))
+            } else if (et === 'round_end') {
+              const r = Number(evt.round)
+              updateTurn(t => patchRound(t, r, rd => ({
+                ...rd,
+                finishReason: String(evt.finish_reason || ''),
+                hadToolCalls: Boolean(evt.had_tool_calls),
+              })))
+            } else if (et === 'done') {
+              if (evt.session_id) setCurrentSessionId(evt.session_id as string)
+              const finalIdx = evt.final_round_index != null ? Number(evt.final_round_index) : undefined
               const newLogId = evt.log_id ? Number(evt.log_id) : null
               if (newLogId) {
                 setCurrentLogId(newLogId)
                 await qc.invalidateQueries({ queryKey: ['query-log', newLogId] })
               }
-              updateTurn(t => ({ ...t, done: true }))
+              updateTurn(t => ({ ...t, done: true, finalRoundIndex: finalIdx }))
               await refetch(); await qc.invalidateQueries({ queryKey: ['stats'] })
             }
-          } catch { /* skip */ }
+          } catch { /* skip malformed */ }
         }
       }
     } catch (err) { if ((err as Error).name !== 'AbortError') setError(String(err)) }
     finally {
       setStreaming(false); abortRef.current = null
-      setTurns(prev => prev.map((t, idx) => {
+      setTurns(prev => prev.map(t => {
         if (t.id !== newTurnId) return t
         const updated = { ...t, done: true }
-        updated.phases.forEach((phase, pi) => {
-          if (phase.text) displayCursors.current.set(`${idx}-${pi}`, phase.text.length)
-        })
         return updated
       }))
       await refetch()
-      // 出队执行下一个
       const next = pendingQueueRef.current.shift()
       if (next) {
         setQueueLength(pendingQueueRef.current.length)
-        await runQueryInternal(next.question, next.mode, next.sessionId)
+        await runQueryInternal(next.question, next.sessionId)
       } else {
         setQueueLength(0)
       }
@@ -298,12 +340,12 @@ export function QueryTab() {
     }
 
     if (streaming) {
-      pendingQueueRef.current.push({ question: q, mode, sessionId: effectiveSessionId })
+      pendingQueueRef.current.push({ question: q, sessionId: effectiveSessionId })
       setQueueLength(pendingQueueRef.current.length)
       return
     }
 
-    await runQueryInternal(q, mode, effectiveSessionId)
+    await runQueryInternal(q, effectiveSessionId)
   }
 
   function handleNewConversation() {
@@ -365,72 +407,63 @@ export function QueryTab() {
                   )}
                 </div>
               )}
-              {turns.map((turn, ti) => (
-                <div key={ti} className="fade-in">
-                  {/* 用户问题气泡 */}
-                  <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-end', gap: 8, marginBottom: 20 }}>
-                    <span style={{ fontSize: 10, color: 'var(--text3)', flexShrink: 0 }}>{fmtTime(new Date(turn.createdAt).toISOString())}</span>
-                    <div style={{
-                      maxWidth: '80%', padding: '10px 16px', borderRadius: '16px 16px 4px 16px',
-                      background: 'var(--accent)', color: '#fff', fontSize: 13, lineHeight: 1.6,
-                    }}>
-                      {turn.question}
-                    </div>
-                  </div>
-                  {/* 阶段输出 */}
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-                    {turn.phases.map((p, i) => (
-                      <div key={i}>
-                        {p.stage && !INLINE_STAGES.has(p.stage) && (
-                          <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--accent2)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 10 }}>
-                            {STAGE_LABEL_KEYS[p.stage] ? t(STAGE_LABEL_KEYS[p.stage] as Parameters<typeof t>[0]) : p.stage}
-                          </div>
-                        )}
-                        {p.toolCalls && p.toolCalls.length > 0 && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: (p.themeResults?.length || p.text) ? 16 : 0 }}>
-                            {p.toolCalls.map((tc, j) => <ToolCallRow key={j} tc={tc} />)}
-                          </div>
-                        )}
-                        {p.themeResults && p.themeResults.length > 0 && (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-                            {p.themeResults.map((tr, j) => <ThemeResultCard key={j} result={tr} />)}
-                          </div>
-                        )}
-                        {p.rawEntries && p.rawEntries.length > 0 && (
-                          <RawRecallBlock
-                            entries={p.rawEntries}
-                            totalChars={p.rawTotalChars}
-                            candidatesRemaining={p.rawCandidatesRemaining}
-                          />
-                        )}
-                        {p.text && INLINE_STAGES.has(p.stage) && (
-                          <div style={{
-                            display: 'inline-block', padding: '10px 16px', borderRadius: '4px 16px 16px 16px',
-                            background: 'var(--surface2)', border: '1px solid var(--border2)',
-                            fontSize: 13, color: 'var(--text)', lineHeight: 1.6,
-                          }}>{getDisplayText(ti, i, p.text)}</div>
-                        )}
-                        {p.text && !INLINE_STAGES.has(p.stage) && p.stage !== 'theme_analysis' && (
-                          <MarkdownText text={getDisplayText(ti, i, p.text)} />
-                        )}
-                        {p.text && p.stage === 'theme_analysis' && !p.themeResults?.length && (
-                          <MarkdownText text={getDisplayText(ti, i, p.text)} />
-                        )}
+              {turns.map((turn, ti) => {
+                const isLast = ti === turns.length - 1
+                const isOffTopic = turn.intent && turn.intent !== 'proceed'
+                const finalIdx = effectiveFinalIndex(turn, isLast && streaming)
+                const thinkingRounds = turn.rounds.filter(r => r.round !== finalIdx)
+                const finalRound = finalIdx != null ? turn.rounds.find(r => r.round === finalIdx) : undefined
+                const finalText = finalRound ? (turn.done ? getFinalDisplay(turn) : finalRound.thinking) : ''
+                return (
+                  <div key={turn.id} className="fade-in">
+                    {/* user bubble */}
+                    <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'flex-end', gap: 8, marginBottom: 20 }}>
+                      <span style={{ fontSize: 10, color: 'var(--text3)', flexShrink: 0 }}>{fmtTime(new Date(turn.createdAt).toISOString())}</span>
+                      <div style={{
+                        maxWidth: '80%', padding: '10px 16px', borderRadius: '16px 16px 4px 16px',
+                        background: 'var(--accent)', color: '#fff', fontSize: 13, lineHeight: 1.6,
+                      }}>
+                        {turn.question}
                       </div>
-                    ))}
-                    {/* 最后一轮流式指示器 */}
-                    {ti === turns.length - 1 && streaming && (
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text3)', fontSize: 12 }}>
-                        <span className="animate-pulse" style={{ color: 'var(--accent)' }}>●</span> {t('query.generating')}
+                    </div>
+
+                    {/* off-topic / clarify shortcut */}
+                    {isOffTopic && (
+                      <div style={{
+                        display: 'inline-block', padding: '10px 16px', borderRadius: '4px 16px 16px 16px',
+                        background: 'var(--surface2)', border: '1px solid var(--border2)',
+                        fontSize: 13, color: 'var(--text)', lineHeight: 1.6,
+                      }}>
+                        {turn.intentMessage || ''}
                       </div>
                     )}
+
+                    {/* normal proceed flow */}
+                    {!isOffTopic && (
+                      <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+                        {thinkingRounds.length > 0 && (
+                          <ThinkingPanel
+                            rounds={thinkingRounds}
+                            streaming={isLast && streaming && !turn.done}
+                          />
+                        )}
+                        {finalText && (
+                          <MarkdownText text={finalText} />
+                        )}
+                        {isLast && streaming && (
+                          <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: 'var(--text3)', fontSize: 12 }}>
+                            <span className="animate-pulse" style={{ color: 'var(--accent)' }}>●</span> {t('query.generating')}
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {ti < turns.length - 1 && (
+                      <div style={{ marginTop: 32, borderBottom: '1px dashed var(--border)', opacity: 0.5 }} />
+                    )}
                   </div>
-                  {/* 轮次分隔 */}
-                  {ti < turns.length - 1 && (
-                    <div style={{ marginTop: 32, borderBottom: '1px dashed var(--border)', opacity: 0.5 }} />
-                  )}
-                </div>
-              ))}
+                )
+              })}
               <div ref={bottomRef} />
             </div>
           )}
@@ -486,19 +519,6 @@ export function QueryTab() {
                 }}>
                 {streaming ? <Square size={13} /> : <Send size={13} />}
               </button>
-            </div>
-            <div style={{ display: 'flex', background: 'var(--surface2)', borderRadius: 8, border: '1px solid var(--border2)', overflow: 'hidden', marginBottom: 1 }}>
-              {(['full', 'fast'] as const).map(m => (
-                <button key={m} onClick={() => setMode(m)}
-                  style={{
-                    padding: '8px 14px', border: 'none', cursor: 'pointer', fontSize: 12, fontWeight: 500,
-                    background: mode === m ? 'var(--accent)' : 'transparent',
-                    color: mode === m ? '#fff' : 'var(--text3)',
-                    transition: 'all 0.12s',
-                  }}>
-                  {m === 'full' ? t('query.mode_full') : t('query.mode_fast')}
-                </button>
-              ))}
             </div>
           </div>
         </div>
@@ -655,131 +675,78 @@ function MarkdownText({ text, style }: { text: string; style?: React.CSSProperti
   return <div style={{ fontSize: 13, color: 'var(--text)', ...style }}>{elements}</div>
 }
 
-function ToolCallRow({ tc }: { tc: ToolCall }) {
-  const { backbones } = useBackbones()
-  const { lang, t } = useI18n()
-  const [open, setOpen] = useState(false)
-  const label = TOOL_LABEL_KEYS[tc.tool] ? t(TOOL_LABEL_KEYS[tc.tool] as Parameters<typeof t>[0]) : tc.tool
-  const hasDetail = tc.detail && (tc.detail.nodes.length > 0 || tc.detail.edges.length > 0)
+// ── Agent-mode helpers ──────────────────────────────────────────────────────
 
-  return (
-    <div style={{
-      borderRadius: 8, border: '1px solid var(--border2)',
-      background: 'var(--surface2)', overflow: 'hidden', fontSize: 12,
-    }}>
-      <div
-        onClick={() => hasDetail && setOpen(v => !v)}
-        style={{
-          display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px',
-          cursor: hasDetail ? 'pointer' : 'default',
-          userSelect: 'none',
-        }}
-      >
-        <span style={{ color: 'var(--accent2)', fontWeight: 600, fontFamily: 'monospace' }}>{label}</span>
-        <span style={{ color: 'var(--text3)' }}>R{tc.round}</span>
-        {tc.summary ? (
-          <span style={{ flex: 1, color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{tc.summary}</span>
-        ) : (
-          <span style={{ flex: 1, color: 'var(--text3)', fontStyle: 'italic' }}>
-            {Object.entries(tc.args).map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join(', ')}
-          </span>
-        )}
-        {tc.node_count != null && tc.node_count > 0 && (
-          <span className="badge" style={{ background: 'rgba(99,102,241,0.12)', color: 'var(--accent2)', flexShrink: 0 }}>{t('query.badge_n_nodes', { n: tc.node_count })}</span>
-        )}
-        {hasDetail && (
-          <span style={{ color: 'var(--text3)', flexShrink: 0 }}>{open ? '▲' : '▼'}</span>
-        )}
-      </div>
-
-      {open && hasDetail && tc.detail && (
-        <div style={{ borderTop: '1px solid var(--border2)', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {tc.detail.nodes.length > 0 && (
-            <div>
-              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{t('query.nodes')}</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 5 }}>
-                {tc.detail.nodes.map((n, i) => {
-                  const color = getDomainColor(n.domain, backbones)
-                  return (
-                    <div key={i} style={{ padding: '6px 8px', borderRadius: 6, background: 'var(--surface)', border: '1px solid var(--border)' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
-                        <span style={{ fontWeight: 600, color: 'var(--text)', fontSize: 11 }}>{n.label}</span>
-                        <span className="badge" style={{ background: color + '22', color, fontSize: 10 }}>{getDomainLabel(n.domain, backbones, lang)}</span>
-                        <span style={{ color: n.origin === 'internal' ? 'var(--accent2)' : 'var(--text3)', fontSize: 10 }}>
-                          {n.origin === 'internal' ? t('query.origin_internal') : t('query.origin_external')}
-                        </span>
-                        <span style={{ marginLeft: 'auto', color: 'var(--text3)', fontSize: 10 }}>
-                          str {n.strength?.toFixed ? n.strength.toFixed(2) : n.strength}
-                          {n.sim != null ? ` · sim ${n.sim.toFixed(3)}` : ''}
-                        </span>
-                      </div>
-                      {n.description && (
-                        <div style={{ marginTop: 3, fontSize: 10, color: 'var(--text3)', lineHeight: 1.5 }}>{n.description}</div>
-                      )}
-                    </div>
-                  )
-                })}
-              </div>
-            </div>
-          )}
-          {tc.detail.edges.length > 0 && (
-            <div>
-              <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{t('query.edges')}</div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-                {tc.detail.edges.map((e, i) => (
-                  <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text2)', fontSize: 11 }}>
-                    <span style={{ color: 'var(--text)' }}>{e.from_label}</span>
-                    <span style={{ color: 'var(--accent2)', fontWeight: 500 }}>—{e.relation_type}→</span>
-                    <span style={{ color: 'var(--text)' }}>{e.to_label}</span>
-                    <span style={{ color: 'var(--text3)', marginLeft: 'auto' }}>{e.weight?.toFixed ? e.weight.toFixed(3) : e.weight}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-    </div>
-  )
+function finalAnswerText(turn: ConvTurn): string {
+  if (turn.intent && turn.intent !== 'proceed') return turn.intentMessage || ''
+  const idx = effectiveFinalIndex(turn, false)
+  if (idx == null) return ''
+  const r = turn.rounds.find(rr => rr.round === idx)
+  return r?.thinking || ''
 }
 
-function RawRecallBlock({
-  entries, totalChars, candidatesRemaining,
-}: { entries: RawEntry[]; totalChars?: number; candidatesRemaining?: number }) {
+function effectiveFinalIndex(turn: ConvTurn, isStreamingNow: boolean): number | undefined {
+  if (turn.finalRoundIndex != null) return turn.finalRoundIndex
+  if (!turn.rounds.length) return undefined
+  // Mid-stream: tentatively treat the last round with no tool_calls as the answer.
+  // While streaming we don't yet know — show no final until round_end clarifies.
+  if (isStreamingNow) {
+    for (let i = turn.rounds.length - 1; i >= 0; i--) {
+      const r = turn.rounds[i]
+      if (r.finishReason && !r.hadToolCalls) return r.round
+    }
+    return undefined
+  }
+  // After done: pick the last round that had no tool_calls
+  for (let i = turn.rounds.length - 1; i >= 0; i--) {
+    const r = turn.rounds[i]
+    if (!r.hadToolCalls) return r.round
+  }
+  return turn.rounds[turn.rounds.length - 1].round
+}
+
+function ThinkingPanel({ rounds, streaming }: { rounds: AgentRound[]; streaming: boolean }) {
   const { t } = useI18n()
-  const [expanded, setExpanded] = useState(false)
+  const [open, setOpen] = useState(streaming)
+  // auto-open while streaming, auto-collapse once we have the final answer
+  useEffect(() => { if (streaming) setOpen(true) }, [streaming])
+  const totalCalls = rounds.reduce((s, r) => s + r.toolCalls.length, 0)
   return (
-    <div style={{ borderRadius: 10, border: '1px solid var(--border)', overflow: 'hidden', fontSize: 12 }}>
+    <div style={{ borderRadius: 10, border: '1px solid var(--border2)', overflow: 'hidden', fontSize: 12 }}>
       <button
-        onClick={() => setExpanded(v => !v)}
+        onClick={() => setOpen(v => !v)}
         style={{
-          width: '100%', padding: '10px 14px', background: 'var(--surface2)',
+          width: '100%', padding: '8px 14px', background: 'var(--surface2)',
           border: 'none', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 8,
-          color: 'var(--text)', fontSize: 12, textAlign: 'left',
+          color: 'var(--text)', textAlign: 'left',
         }}
       >
-        <span style={{ color: 'var(--accent2)' }}>{expanded ? '▲' : '▼'}</span>
-        <span style={{ fontWeight: 600 }}>{t('query.raw_records_n', { n: entries.length })}</span>
+        <span style={{ color: 'var(--accent2)' }}>{open ? '▾' : '▸'}</span>
+        <span style={{ fontWeight: 600 }}>{t('query.thinking')}</span>
         <span style={{ color: 'var(--text3)', fontSize: 11 }}>
-          {totalChars ? ` ${t('query.raw_total_chars', { n: totalChars })}` : ''}
-          {typeof candidatesRemaining === 'number' && candidatesRemaining > 0 ? t('query.raw_candidates_n', { n: candidatesRemaining }) : ''}
+          {t('query.thinking_meta', { rounds: rounds.length, calls: totalCalls })}
         </span>
+        {streaming && (
+          <span className="animate-pulse" style={{ marginLeft: 'auto', color: 'var(--accent)', fontSize: 10 }}>●</span>
+        )}
       </button>
-      {expanded && (
-        <div style={{ padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 12, borderTop: '1px solid var(--border)' }}>
-          {entries.map((e, i) => (
-            <div key={i} style={{ borderLeft: '2px solid var(--accent2)', paddingLeft: 10 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4, flexWrap: 'wrap' }}>
-                <span style={{ fontSize: 10, color: 'var(--text3)' }}>#{e.id} · {e.date}</span>
-                {e.linked_nodes?.slice(0, 5).map((l, k) => (
-                  <span key={k} className="badge" style={{ fontSize: 10, padding: '1px 6px' }}>
-                    {l.label}（{l.strength.toFixed(2)}）
-                  </span>
-                ))}
+      {open && (
+        <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', gap: 16, borderTop: '1px solid var(--border2)' }}>
+          {rounds.map(r => (
+            <div key={r.round}>
+              <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 6 }}>
+                {t('query.round_n', { n: r.round })}
               </div>
-              <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.65, whiteSpace: 'pre-wrap' }}>
-                {e.raw}
-              </div>
+              {r.thinking && (
+                <div style={{ fontSize: 12, color: 'var(--text2)', lineHeight: 1.65, whiteSpace: 'pre-wrap', marginBottom: r.toolCalls.length ? 8 : 0 }}>
+                  {r.thinking}
+                </div>
+              )}
+              {r.toolCalls.length > 0 && (
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {r.toolCalls.map(tc => <AgentToolCallRow key={tc.callId} tc={tc} />)}
+                </div>
+              )}
             </div>
           ))}
         </div>
@@ -788,66 +755,176 @@ function RawRecallBlock({
   )
 }
 
-function ThemeResultCard({ result }: { result: ThemeResult }) {
-  const { backbones } = useBackbones()
+function AgentToolCallRow({ tc }: { tc: AgentToolCall }) {
   const { t } = useI18n()
-  const [showEntries, setShowEntries] = useState(false)
-  const n = result.node
-  const color = getDomainColor(n.domain, backbones)
-
+  const [open, setOpen] = useState(false)
+  const label = TOOL_LABEL_KEYS[tc.tool] ? t(TOOL_LABEL_KEYS[tc.tool] as Parameters<typeof t>[0]) : tc.tool
+  const color = TOOL_COLORS[tc.tool] || '#94a3b8'
+  const argText = Object.entries(tc.args)
+    .map(([k, v]) => `${k}=${typeof v === 'string' ? `"${v}"` : JSON.stringify(v)}`)
+    .join(', ')
+  const hasDetail = tc.detail && Object.keys(tc.detail).length > 0
   return (
-    <div style={{ borderRadius: 10, border: '1px solid var(--border)', overflow: 'hidden', fontSize: 12 }}>
-      <div style={{ padding: '10px 14px', background: 'var(--surface2)', borderBottom: '1px solid var(--border)' }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
-          <span className="badge" style={{ background: color + '22', color }}>{n.domain} · {n.node_type}</span>
-          <span style={{ fontWeight: 700, color: 'var(--text)', fontSize: 13 }}>{n.label}</span>
-          <span style={{ color: n.origin === 'internal' ? 'var(--accent2)' : 'var(--text3)', fontSize: 10 }}>
-            {n.origin === 'internal' ? t('query.origin_internal') : t('query.origin_external')}
+    <div style={{
+      borderRadius: 8, border: '1px solid var(--border2)',
+      background: 'var(--surface)', overflow: 'hidden', fontSize: 12,
+      borderLeft: `3px solid ${color}`,
+    }}>
+      <div
+        onClick={() => hasDetail && setOpen(v => !v)}
+        style={{
+          display: 'flex', alignItems: 'center', gap: 8, padding: '7px 12px',
+          cursor: hasDetail ? 'pointer' : 'default', userSelect: 'none', flexWrap: 'wrap',
+        }}
+      >
+        <span style={{ color, fontWeight: 600 }}>{label}</span>
+        <span style={{ color: 'var(--text3)', fontFamily: 'monospace', fontSize: 11 }}>({argText})</span>
+        {tc.summary ? (
+          <span style={{ flex: 1, color: 'var(--text2)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 80 }}>
+            → {tc.summary}
           </span>
-          <span style={{ marginLeft: 'auto', color: 'var(--text3)', fontSize: 10, flexShrink: 0 }}>
-            strength {n.strength.toFixed(3)}
-          </span>
-        </div>
-        {n.description && (
-          <div style={{ marginTop: 4, fontSize: 11, color: 'var(--text3)', lineHeight: 1.5 }}>{n.description}</div>
+        ) : (
+          <span style={{ flex: 1, color: 'var(--text3)', fontStyle: 'italic' }}>{t('query.tool_running')}</span>
+        )}
+        {tc.latencyMs != null && tc.latencyMs > 0 && (
+          <span style={{ color: 'var(--text3)', fontSize: 10, flexShrink: 0 }}>{tc.latencyMs}ms</span>
+        )}
+        {hasDetail && (
+          <span style={{ color: 'var(--text3)', flexShrink: 0 }}>{open ? '▲' : '▼'}</span>
         )}
       </div>
-
-      {result.entries.length > 0 && (
-        <>
-          <button
-            onClick={() => setShowEntries(v => !v)}
-            style={{
-              width: '100%', padding: '6px 14px', background: 'none',
-              border: 'none', borderBottom: showEntries ? '1px solid var(--border)' : 'none',
-              cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 6,
-              color: 'var(--text3)', fontSize: 11, textAlign: 'left',
-            }}
-          >
-            <span style={{ color: 'var(--accent2)' }}>{showEntries ? '▲' : '▼'}</span>
-            {t('query.raw_records_click', { n: result.entries.length })}
-          </button>
-          {showEntries && (
-            <div style={{
-              padding: '10px 14px', display: 'flex', flexDirection: 'column', gap: 10,
-              borderBottom: '1px solid var(--border)', background: 'var(--surface)',
-            }}>
-              {result.entries.map((e, i) => (
-                <div key={i}>
-                  <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 3 }}>{e.date}</div>
-                  <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.65, fontStyle: 'italic' }}>
-                    「{e.raw}」
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </>
+      {open && hasDetail && tc.detail && (
+        <ToolDetailRender detail={tc.detail} />
       )}
+    </div>
+  )
+}
 
-      <div style={{ padding: '12px 14px', color: 'var(--text)', lineHeight: 1.75, fontSize: 12 }}>
-        {result.analysis}
-      </div>
+function ToolDetailRender({ detail }: { detail: ToolCallDetail }) {
+  const { backbones } = useBackbones()
+  const { lang, t } = useI18n()
+  const nodes = (detail.nodes as NodeDetail[] | undefined) || []
+  const edges = (detail.edges as EdgeDetail[] | undefined) || []
+  const blindspots = (detail.blindspots as NodeDetail[] | undefined) || []
+  const opposites = (detail.opposites as NodeDetail[] | undefined) || []
+  const bridges = (detail.bridges as Array<Record<string, unknown>> | undefined) || []
+  const paths = (detail.paths as Array<Record<string, unknown>> | undefined) || []
+  const entries = (detail.entries as Array<Record<string, unknown>> | undefined) || []
+  const results = (detail.results as Array<Record<string, unknown>> | undefined) || []
+  const text = typeof detail.text === 'string' ? detail.text : ''
+
+  const allNodes = [...nodes, ...blindspots, ...opposites]
+
+  return (
+    <div style={{ borderTop: '1px solid var(--border2)', padding: '10px 12px', display: 'flex', flexDirection: 'column', gap: 10 }}>
+      {allNodes.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{t('query.nodes')}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 4 }}>
+            {allNodes.map((n, i) => {
+              const color = getDomainColor(n.domain, backbones)
+              return (
+                <div key={i} style={{ padding: '6px 8px', borderRadius: 6, background: 'var(--surface2)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }}>
+                    <span style={{ fontWeight: 600, color: 'var(--text)', fontSize: 11 }}>{n.label}</span>
+                    <span className="badge" style={{ background: color + '22', color, fontSize: 10 }}>{getDomainLabel(n.domain, backbones, lang)}</span>
+                    <span style={{ color: n.origin === 'internal' ? 'var(--accent2)' : 'var(--text3)', fontSize: 10 }}>
+                      {n.origin === 'internal' ? t('query.origin_internal') : t('query.origin_external')}
+                    </span>
+                    <span style={{ marginLeft: 'auto', color: 'var(--text3)', fontSize: 10 }}>
+                      str {typeof n.strength === 'number' ? n.strength.toFixed(2) : n.strength}
+                      {n.sim != null ? ` · sim ${typeof n.sim === 'number' ? n.sim.toFixed(3) : n.sim}` : ''}
+                    </span>
+                  </div>
+                  {n.description && (
+                    <div style={{ marginTop: 3, fontSize: 10, color: 'var(--text3)', lineHeight: 1.5 }}>{n.description}</div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+      {edges.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{t('query.edges')}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {edges.map((e, i) => (
+              <div key={i} style={{ display: 'flex', alignItems: 'center', gap: 6, color: 'var(--text2)', fontSize: 11 }}>
+                <span style={{ color: 'var(--text)' }}>{e.from_label}</span>
+                <span style={{ color: 'var(--accent2)', fontWeight: 500 }}>—{e.relation_type}→</span>
+                <span style={{ color: 'var(--text)' }}>{e.to_label}</span>
+                <span style={{ color: 'var(--text3)', marginLeft: 'auto' }}>{typeof e.weight === 'number' ? e.weight.toFixed(3) : e.weight}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {bridges.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{t('query.bridges')}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+            {bridges.map((b, i) => (
+              <div key={i} style={{ fontSize: 11, color: 'var(--text2)' }}>
+                [{String(b.from_origin)}] {String(b.from_label)} —{String(b.relation_type)}→ [{String(b.to_origin)}] {String(b.to_label)}
+                <span style={{ color: 'var(--text3)', marginLeft: 6 }}>w={typeof b.weight === 'number' ? b.weight.toFixed(2) : String(b.weight ?? '')}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {paths.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{t('query.paths')}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {paths.map((p, i) => {
+              const hops = (p.hops as Array<Record<string, unknown>> | undefined) || []
+              return (
+                <div key={i} style={{ fontSize: 11, color: 'var(--text2)' }}>
+                  <span style={{ color: 'var(--accent2)' }}>{String(p.anchor_label)}</span>
+                  {hops.map((h, j) => (
+                    <span key={j}> →{String(h.relation)}→ <span style={{ color: 'var(--text)' }}>{String(h.to_label)}</span></span>
+                  ))}
+                  <span style={{ color: 'var(--text3)', marginLeft: 6 }}>score={String(p.score)}</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+      {entries.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{t('query.raw_records_n', { n: entries.length })}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {entries.map((e, i) => (
+              <div key={i} style={{ borderLeft: '2px solid var(--accent2)', paddingLeft: 10 }}>
+                <div style={{ fontSize: 10, color: 'var(--text3)', marginBottom: 3 }}>#{String(e.id)} · {String(e.date)}</div>
+                <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{String(e.raw)}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {results.length > 0 && (
+        <div>
+          <div style={{ fontSize: 10, fontWeight: 600, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 6 }}>{t('query.web_results')}</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            {results.map((r, i) => (
+              <div key={i} style={{ fontSize: 11 }}>
+                <a href={String(r.url || '')} target="_blank" rel="noreferrer" style={{ color: 'var(--accent2)', fontWeight: 600 }}>
+                  {String(r.title || r.url || '(untitled)')}
+                </a>
+                {r.snippet ? <div style={{ color: 'var(--text3)', marginTop: 2 }}>{String(r.snippet)}</div> : null}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
+      {text && (
+        <div style={{ fontSize: 11, color: 'var(--text2)', lineHeight: 1.65, whiteSpace: 'pre-wrap', padding: 6, background: 'var(--surface2)', borderRadius: 4 }}>
+          {text}
+        </div>
+      )}
     </div>
   )
 }

@@ -7,7 +7,7 @@ from fastapi import FastAPI
 from fastapi.staticfiles import StaticFiles
 from app.lib.db import init_db
 from app.lib.config_loader import detect_orphan_domains
-from app.routes import capture, import_entries, process_entry, query, revert_entry, ui_api
+from app.routes import agent, capture, import_entries, process_entry, query, revert_entry, ui_api
 
 app = FastAPI(title="Cognitive Service")
 logger = logging.getLogger("cognitive")
@@ -31,6 +31,7 @@ app.include_router(import_entries.router)
 app.include_router(process_entry.router)
 app.include_router(revert_entry.router)
 app.include_router(query.router)
+app.include_router(agent.router)
 app.include_router(ui_api.router)
 
 

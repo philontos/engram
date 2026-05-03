@@ -94,20 +94,17 @@ server.tool(
 
 server.tool(
   "cognitive_query",
-  "Query the Engram cognitive graph for deep self-analysis. " +
+  "Query the Engram cognitive agent for deep self-analysis. " +
   "Use when the user asks questions involving their personality, values, cognitive patterns, " +
   "decision-making tendencies, or explicitly asks to analyze using their cognitive profile.",
   {
     question: z.string().describe("The user's question or topic to analyze"),
-    mode: z.enum(["full", "fast"]).optional().describe(
-      "full (default): baseline + persona + graph + synthesis. fast: graph + synthesis only."
-    ),
     continue_last: z.boolean().optional().describe(
       "Set true when the user is picking up an earlier conversation. " +
       "Default false for any new standalone question."
     ),
   },
-  async ({ question, mode = "full", continue_last = false }) => {
+  async ({ question, continue_last = false }) => {
     let sessionId: string | undefined;
 
     if (continue_last) {
@@ -115,69 +112,67 @@ server.tool(
       if (latest.session_id) sessionId = latest.session_id;
     }
 
-    const resp = await fetch(`${SERVICE_URL}/query`, {
+    const resp = await fetch(`${SERVICE_URL}/query/agent`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ question, mode, session_id: sessionId ?? null }),
+      body: JSON.stringify({ question, session_id: sessionId ?? null }),
     });
 
     if (!resp.ok) {
       const text = await resp.text();
-      throw new Error(`Query error ${resp.status}: ${text}`);
+      throw new Error(`Agent error ${resp.status}: ${text}`);
     }
 
-    // Consume NDJSON stream
+    // Consume NDJSON stream — collect deltas keyed by round; the final-round
+    // text (whichever round the agent declared answer-only) is the response,
+    // intent_check shortcuts when the agent declines to engage.
     const body = await resp.text();
     const lines = body.split("\n").filter((l) => l.trim());
 
-    const stages: Record<string, string> = {
-      baseline: "",
-      persona_blindspot: "",
-      graph_insight: "",
-      intent_check: "",
-    };
-    let finalSessionId = sessionId;
+    const roundText: Record<number, string> = {};
+    let finalRoundIndex: number | undefined;
+    let intentMessage = "";
+    let intentNonProceed = false;
 
     for (const line of lines) {
       try {
         const event = JSON.parse(line) as {
           type: string;
-          stage?: string;
+          round?: number;
           delta?: string;
-          session_id?: string;
+          intent?: string;
           message?: string;
+          session_id?: string;
+          final_round_index?: number;
         };
-        if (event.type === "delta" && event.stage && event.delta && event.stage in stages) {
-          stages[event.stage] += event.delta;
-        }
-        if (event.type === "done" && event.session_id) {
-          finalSessionId = event.session_id;
-        }
-        if (event.type === "error") {
-          throw new Error(event.message ?? "query pipeline error");
+        if (event.type === "intent_check" && event.intent && event.intent !== "proceed") {
+          intentNonProceed = true;
+          intentMessage = event.message ?? "";
+        } else if (event.type === "delta" && typeof event.round === "number" && event.delta) {
+          roundText[event.round] = (roundText[event.round] ?? "") + event.delta;
+        } else if (event.type === "done") {
+          if (typeof event.final_round_index === "number") {
+            finalRoundIndex = event.final_round_index;
+          }
+        } else if (event.type === "error") {
+          throw new Error(event.message ?? "agent error");
         }
       } catch {
         // skip malformed lines
       }
     }
 
-    void finalSessionId;
-
-    if (stages.intent_check) {
-      return {
-        content: [{ type: "text" as const, text: stages.intent_check }],
-      };
+    if (intentNonProceed) {
+      return { content: [{ type: "text" as const, text: intentMessage }] };
     }
 
-    const sections: string[] = [];
-    if (stages.baseline) sections.push(`## Baseline\n\n${stages.baseline}`);
-    if (stages.persona_blindspot) sections.push(`## Persona lens\n\n${stages.persona_blindspot}`);
-    if (stages.graph_insight) sections.push(`## Graph insight\n\n${stages.graph_insight}`);
-
-    const output = sections.length > 0 ? sections.join("\n\n") : "(No relevant content in graph)";
+    const finalText =
+      finalRoundIndex != null && roundText[finalRoundIndex]
+        ? roundText[finalRoundIndex]
+        : Object.values(roundText).at(-1) ?? "(no response)";
 
     return {
-      content: [{ type: "text" as const, text: output }],
+      content: [{ type: "text" as const, text: finalText }],
     };
   }
 );

@@ -159,6 +159,24 @@ def init_db():
             );
 
             CREATE INDEX IF NOT EXISTS idx_query_logs_created ON query_logs(created_at);
+
+            -- Agent 执行轨迹（每个 turn 拆成多个事件：llm_round / tool_call）
+            CREATE TABLE IF NOT EXISTS query_traces (
+                id            INTEGER PRIMARY KEY AUTOINCREMENT,
+                session_id    TEXT    NOT NULL,
+                turn_index    INTEGER NOT NULL,
+                round_num     INTEGER,
+                seq           INTEGER NOT NULL,
+                event_type    TEXT    NOT NULL CHECK(event_type IN ('llm_round','tool_call')),
+                tool_name     TEXT,
+                request_json  TEXT,
+                response_json TEXT,
+                latency_ms    INTEGER,
+                error         TEXT,
+                created_at    TEXT    NOT NULL
+            );
+            CREATE INDEX IF NOT EXISTS idx_query_traces_session_turn ON query_traces(session_id, turn_index, seq);
+            CREATE INDEX IF NOT EXISTS idx_query_traces_created      ON query_traces(created_at);
         """)
         # 存量表迁移
         pt_cols = {row[1] for row in conn.execute("PRAGMA table_info(pipeline_traces)").fetchall()}

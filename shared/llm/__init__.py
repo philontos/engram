@@ -4,6 +4,7 @@ from .client import (
     chat_json,
     chat_text_stream,
     chat_with_tools,
+    chat_with_tools_stream,
     is_structured_llm_configured,
     resolve_structured_llm_config,
 )
@@ -14,6 +15,7 @@ __all__ = [
     "chat_json",
     "chat_text_stream",
     "chat_with_tools",
+    "chat_with_tools_stream",
     "is_structured_llm_configured",
     "resolve_structured_llm_config",
 ]

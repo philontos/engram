@@ -280,6 +280,158 @@ async def chat_with_tools(
         raise
 
 
+async def chat_with_tools_stream(
+    *,
+    messages: list[dict],
+    tools: list[dict],
+    temperature: float = 0.3,
+    stage: str = "",
+    context: dict | None = None,
+) -> AsyncIterator[dict]:
+    """Streaming variant of chat_with_tools, OpenAI-compatible SSE.
+
+    Yields events:
+      {"type":"content_delta",     "delta": str}
+      {"type":"tool_call_partial", "index": int, "id": str|None,
+                                   "name": str|None, "arguments_delta": str}
+      {"type":"done",              "finish_reason": str, "message": dict,
+                                   "usage": dict, "duration_ms": int}
+
+    The final "message" follows the OpenAI assistant-message shape and is ready
+    to be appended back to the messages list before the next round.
+    """
+    config = resolve_structured_llm_config()
+    if not is_structured_llm_configured():
+        raise StructuredLLMError("LLM not configured.")
+
+    payload = {
+        "model": config["model"],
+        "temperature": temperature,
+        "stream": True,
+        "stream_options": {"include_usage": True},
+        "messages": messages,
+        "tools": tools,
+        "tool_choice": "auto",
+    }
+    prompt_chars = sum(len(m.get("content") or "") for m in messages)
+    start = time.monotonic()
+
+    content_buf = ""
+    tc_acc: dict[int, dict] = {}
+    finish_reason = "stop"
+    usage: dict = {}
+
+    try:
+        async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
+            async with client.stream(
+                "POST",
+                f"{config['base_url']}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {config['api_key']}",
+                    "Content-Type": "application/json",
+                },
+                json=payload,
+            ) as resp:
+                if resp.status_code >= 400:
+                    body = await resp.aread()
+                    _record_llm_call({
+                        "stage": stage or "unknown", "model": config["model"],
+                        "prompt_chars": prompt_chars,
+                        "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                        "duration_ms": int((time.monotonic() - start) * 1000),
+                        "context": context or {},
+                        "status": "http_error",
+                        "error": f"status={resp.status_code}",
+                    })
+                    raise StructuredLLMError(
+                        f"Tool-call stream LLM failed: status={resp.status_code} body={body[:400]!r}"
+                    )
+                async for line in resp.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    chunk = line[5:].strip()
+                    if chunk == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(chunk)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(obj.get("usage"), dict):
+                        usage = obj["usage"]
+                    choices = obj.get("choices") or []
+                    if not choices:
+                        continue
+                    choice = choices[0]
+                    fr = choice.get("finish_reason")
+                    if fr:
+                        finish_reason = fr
+                    delta = choice.get("delta") or {}
+                    text_delta = delta.get("content")
+                    if text_delta:
+                        content_buf += text_delta
+                        yield {"type": "content_delta", "delta": text_delta}
+                    for tc_delta in delta.get("tool_calls") or []:
+                        idx = tc_delta.get("index", 0)
+                        slot = tc_acc.setdefault(idx, {
+                            "id": None,
+                            "type": "function",
+                            "function": {"name": "", "arguments": ""},
+                        })
+                        if tc_delta.get("id"):
+                            slot["id"] = tc_delta["id"]
+                        fn = tc_delta.get("function") or {}
+                        if fn.get("name"):
+                            slot["function"]["name"] = fn["name"]
+                        args_piece = fn.get("arguments")
+                        if args_piece is not None:
+                            slot["function"]["arguments"] += args_piece
+                        yield {
+                            "type": "tool_call_partial",
+                            "index": idx,
+                            "id": slot["id"],
+                            "name": slot["function"]["name"] or None,
+                            "arguments_delta": args_piece or "",
+                        }
+    except StructuredLLMError:
+        raise
+    except Exception as exc:
+        _record_llm_call({
+            "stage": stage or "unknown", "model": config["model"],
+            "prompt_chars": prompt_chars,
+            "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+            "duration_ms": int((time.monotonic() - start) * 1000),
+            "context": context or {}, "status": "exception", "error": str(exc)[:200],
+        })
+        raise
+
+    duration_ms = int((time.monotonic() - start) * 1000)
+    tool_calls_final = [tc_acc[i] for i in sorted(tc_acc.keys())] if tc_acc else None
+    message: dict = {"role": "assistant", "content": content_buf or None}
+    if tool_calls_final:
+        message["tool_calls"] = tool_calls_final
+
+    _record_llm_call({
+        "stage": stage or "unknown", "model": config["model"],
+        "prompt_chars": prompt_chars,
+        "prompt_tokens": int(usage.get("prompt_tokens", 0)),
+        "completion_tokens": int(usage.get("completion_tokens", 0))
+            or _estimate_tokens(len(content_buf)),
+        "total_tokens": int(usage.get("total_tokens", 0)),
+        "duration_ms": duration_ms,
+        "context": context or {},
+        "status": "ok",
+        "streamed": True,
+    })
+
+    yield {
+        "type": "done",
+        "finish_reason": finish_reason,
+        "message": message,
+        "usage": usage,
+        "duration_ms": duration_ms,
+    }
+
+
 async def chat_text_stream(
     *, system_prompt: str, user_prompt: str, temperature: float = 0.7,
     stage: str = "", context: dict | None = None,

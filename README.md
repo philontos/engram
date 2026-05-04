@@ -156,7 +156,7 @@ Every entry contributes signals. Your profile evolves. The graph grows denser. O
 ## Quick start
 
 ```bash
-git clone https://github.com/your-username/engram.git
+git clone https://github.com/philontos/engram.git
 cd engram
 
 # Configure your LLM API key
@@ -329,7 +329,7 @@ That's it. No per-provider flags, no streaming toggle.
 | `ark`        | Volcengine ARK / Doubao | |
 | `ollama`     | Local Ollama          | `http://localhost:11434/v1` |
 
-Any other OpenAI-compatible endpoint (vLLM, LM Studio, LiteLLM, Together, Groq, Fireworks, …) works via Option A above.
+Any other OpenAI-compatible endpoint (vLLM, LM Studio, LiteLLM, Together, Groq, Fireworks, …) works the same way — just set `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` directly.
 
 #### Compatibility status — honest matrix
 

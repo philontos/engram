@@ -156,7 +156,7 @@ technology     ●●●○○○
 ## 快速开始
 
 ```bash
-git clone https://github.com/your-username/engram.git
+git clone https://github.com/philontos/engram.git
 cd engram
 
 # 配置 LLM API 密钥
@@ -329,7 +329,7 @@ LLM_MODEL=gpt-4.1-mini
 | `ark`        | 火山引擎 ARK / 豆包    | |
 | `ollama`     | 本地 Ollama           | `http://localhost:11434/v1` |
 
-其他任意 OpenAI 兼容端点（vLLM、LM Studio、LiteLLM、Together、Groq、Fireworks…）走上面的 Option A 即可。
+其他任意 OpenAI 兼容端点（vLLM、LM Studio、LiteLLM、Together、Groq、Fireworks…）也是同样的三件套：直接配置 `LLM_BASE_URL` / `LLM_API_KEY` / `LLM_MODEL` 即可。
 
 #### 兼容性矩阵 — 诚实标注
 

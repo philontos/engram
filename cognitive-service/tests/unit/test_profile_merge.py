@@ -159,26 +159,6 @@ class TestMergeDimensionEndToEnd:
         assert content["E"]["score"] == pytest.approx(70.0, abs=1.0)
         assert row["sample_count"] == 200
 
-    def test_existing_data_without_tau_is_compatible(self, db):
-        # 模拟老数据：直接写入没有 tau 的 content_json
-        legacy = {"O": {"score": 75.0, "confidence": 0.6, "evidence": "old"}}
-        with get_conn() as conn:
-            conn.execute(
-                "INSERT INTO profile_dimensions (dimension, content_json, sample_count) VALUES (?, ?, ?)",
-                ("ocean", json.dumps(legacy), 50),
-            )
-
-        # 喂入新数据，应当被识别并融合（按 tau_prior 默认值起步）
-        merge_dimension("ocean", {"O": {"score": 30, "confidence": 0.5, "evidence": "new"}})
-
-        with get_conn() as conn:
-            row = conn.execute("SELECT content_json FROM profile_dimensions").fetchone()
-        content = json.loads(row["content_json"])
-        # 老 score=75，τ=1 默认; 新 (30, 0.5)：τ_obs=0.25, τ_new=0.98+0.25=1.23, α≈0.203
-        # μ_new = 75 + 0.203 × (30-75) = 75 - 9.13 ≈ 65.87
-        assert content["O"]["score"] == pytest.approx(65.87, abs=1.0)
-        assert "tau" in content["O"]  # 新 schema 已写入
-
     def test_facts_key_value_overwrite_unchanged(self, db):
         # facts 维度（无 score 字段）走旧覆盖逻辑，不受贝叶斯影响
         merge_dimension("facts", {"occupation": {"value": "engineer", "evidence": "干工程"}}, entry_id=1)

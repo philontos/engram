@@ -17,9 +17,7 @@
 存储格式（profile_dimensions.content_json 的子维度对象）：
     {"score": μ, "tau": τ, "confidence": τ/(τ+τ_ref), "evidence": "...", ...}
 
-兼容：
-- 老数据没有 tau 字段 → 默认 τ=tau_prior，相当于"按新方案重启 1 个虚拟样本"
-- facts / key_value 等无 score 字段的子维度走旧覆盖逻辑，不变
+facts / key_value 等无 score 字段的子维度走覆盖逻辑（直接取新值）。
 
 详细推导、参数物理含义、收敛仿真见 cognitive-service/README.md "Profile Merge"。
 """
@@ -111,10 +109,10 @@ def merge_dimension(dimension: str, new_content: dict, entry_id: int | None = No
                 merged[key] = old_val
             continue
 
-        # 起点：旧画像（带 tau 兼容）或先验
+        # 起点：已有画像或先验
         if isinstance(old_val, dict) and "score" in old_val:
-            old_score = float(old_val.get("score", score_prior))
-            old_tau = float(old_val.get("tau", tau_prior))
+            old_score = float(old_val["score"])
+            old_tau = float(old_val["tau"])
         else:
             old_score = score_prior
             old_tau = tau_prior

@@ -53,7 +53,24 @@ OPPOSITION_PROPAGATION = {
 }
 
 PROFILE_MERGE = {
-    "lambda": 0.01,
+    # 贝叶斯递推融合参数。每条 entry 对每个子维度独立做共轭更新：
+    #   τ_obs  = c²                      （观测精度，c 为 LLM 置信度）
+    #   τ_new  = γ × τ_old + τ_obs       （遗忘因子衰减后累加）
+    #   α      = τ_obs / τ_new           （新观测的混合权重）
+    #   μ_new  = μ_old + α × (x − μ_old) （后验均值递推）
+    #
+    # 数学保证：稳态 τ → E[c²] / (1−γ)，α 也随之有界，画像追踪能力不会随
+    # 使用时间衰减；θ 不变时 μ 收敛到 E[x]，θ 慢漂移时 μ 在约 1/(1−γ) 条
+    # entry 内追上变化。详细推导见 cognitive-service/README.md "Profile Merge"。
+    "gamma":     0.98,    # 遗忘因子。等价于"画像每年漂移 ~5 分"的卡尔曼先验。
+                          #   1.00 = 永不遗忘（纯贝叶斯，假设画像绝对不变）
+                          #   0.98 = 半衰期 ~34 条 entry，稳态有效样本 ~50
+                          #   0.95 = 半衰期 ~14 条 entry，稳态有效样本 ~20
+    "tau_prior": 1.0,     # 虚拟先验样本：等价于"系统先天信任 score=midpoint 一条"。
+                          #   防止首条 entry 把分数拉飞到极端值。
+    "tau_ref":   5.0,     # confidence 展示值映射的参考点：confidence = τ/(τ+τ_ref)，
+                          #   τ=τ_ref 时 confidence=0.5，τ→∞ 时趋近 1.0。
+    "min_conf":  0.15,    # 抽取置信度过滤阈值；低于此视为无信号，跳过更新。
 }
 
 RETRIEVAL = {

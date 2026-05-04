@@ -100,6 +100,8 @@ export interface GraphData {
 export interface SubDimValue {
   score: number
   confidence: number
+  /** 累积观测精度（贝叶斯递推融合）。前端不直接使用，confidence 已由 τ 派生。 */
+  tau?: number
   evidence?: string
 }
 

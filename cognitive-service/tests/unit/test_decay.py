@@ -1,12 +1,15 @@
-"""节点强度 & 画像融合的时间衰减公式测试。
+"""节点强度时间衰减公式测试。
 
-这些公式散落在 backbone_pipeline._update_node_strength 和 profile_merge.merge_dimension，
-逻辑完全一致，统一在这里验证。改动任一参数时测试会挂，提醒你后果。
+公式定义在 backbone_pipeline._update_node_strength。改动 NODE_STRENGTH 参数
+时这里会挂，提醒你后果。
+
+注意：profile_merge 已切换到贝叶斯递推（见 test_profile_merge.py），不再共用
+此处的 freq_bonus / alpha 公式。
 """
 
 import math
 import pytest
-from app.config.graph_rules import NODE_STRENGTH, PROFILE_MERGE, EDGE_DECAY
+from app.config.graph_rules import NODE_STRENGTH, EDGE_DECAY
 
 
 # ── 共用的纯公式（与生产代码保持一致）─────────────────────────────────────────
@@ -44,10 +47,6 @@ class TestTimeDecay:
         result = _time_decay(365, self.lam)
         assert result == pytest.approx(math.exp(-0.01 * 365), rel=1e-6)
         assert result < 0.03
-
-    def test_profile_lambda_same_value(self):
-        # profile_merge 与 node_strength 使用相同衰减系数
-        assert PROFILE_MERGE["lambda"] == NODE_STRENGTH["lambda"]
 
 
 # ── 频次加成 ────────────────────────────────────────────────────────────────

@@ -328,6 +328,10 @@ async def stream_process(entry_id: int):
     Subscribers opened after the pipeline finishes (within the channel
     retention window) get a full replay; otherwise the response is empty
     and the caller should fall back to fetching the persisted trace.
+
+    NOTE: this endpoint **only subscribes** — it does not start processing.
+    Callers must first POST /entries/{id}/process/start (or rely on /capture
+    auto-trigger) to actually trigger the pipeline.
     """
     async def gen():
         try:
@@ -340,3 +344,33 @@ async def stream_process(entry_id: int):
             ) + "\n"
 
     return StreamingResponse(gen(), media_type="application/x-ndjson")
+
+
+@router.post("/entries/{entry_id}/process/start")
+async def start_process(entry_id: int, force: bool = False):
+    """Trigger pipeline processing for a single entry in the background.
+
+    Mirrors what /capture does after saving a new entry: init the events
+    channel + asyncio.create_task. UI can then GET /process/stream to watch
+    progress in real time.
+
+    Use this when the entry already exists in DB (e.g., after admin reset
+    derived data, or for slice_failed / failed / reverted entries). For
+    new captures, use POST /capture which auto-triggers; you don't need
+    /start in that case.
+    """
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, processing_status FROM entries WHERE id = ?", (entry_id,)
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail=f"Entry {entry_id} not found")
+
+    if row["processing_status"] == "processed" and not force:
+        raise HTTPException(status_code=409, detail="Already processed. Use ?force=true to reprocess.")
+    if row["processing_status"] == "processing":
+        raise HTTPException(status_code=409, detail="Already in progress.")
+
+    process_events.init(entry_id)
+    asyncio.create_task(run_pipeline_bg(entry_id))
+    return {"entry_id": entry_id, "status": "started"}

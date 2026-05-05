@@ -126,3 +126,50 @@ export const importEntries = (entries: unknown[]) =>
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ entries }),
   })
+
+// ── Pipeline ──────────────────────────────────────────────────────────────────
+export type PipelineEntryRow = {
+  id: number
+  created_at: string
+  processing_status: string
+  preview: string
+  has_trace: boolean
+}
+
+export type PipelineHealthRow = {
+  dimension: string
+  entries_with_data: number
+  subdim_observations: number
+  null_count: number
+  low_conf_count: number
+  midpoint_hedge_count: number
+  null_ratio: number
+  low_conf_ratio: number
+  midpoint_hedge_ratio: number
+}
+
+export type PipelineHealth = {
+  entries_scanned: number
+  entries_with_health: number
+  by_dimension: PipelineHealthRow[]
+}
+
+export type ReplayResult = {
+  entries_processed: number
+  slice_features_replayed: number
+  dimensions_touched: number
+  snapshots_written: number
+}
+
+export const fetchPipelineEntries = (limit = 50) =>
+  req<PipelineEntryRow[]>(`/ui/api/pipeline/entries?limit=${limit}`)
+
+export const fetchPipelineHealth = (limit = 100) =>
+  req<PipelineHealth>(`/ui/api/pipeline/health?limit=${limit}`)
+
+export const replayProfileMerge = (opts: { dimension?: string; limit?: number } = {}) =>
+  req<ReplayResult>('/ui/api/admin/replay/profile-merge', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts),
+  })

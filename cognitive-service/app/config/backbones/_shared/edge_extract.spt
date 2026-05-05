@@ -22,17 +22,30 @@ ${subgraph}
 - Cover all combinations: internal↔internal (logical chains in raw), internal↔external (supplement/oppose/extend), external↔external (standard domain structure relations)
 
 ## Identifying opposes relations (actively check)
-1. Scan confirmed_nodes — any pair that forms "opposing stance / competing theory / mutually exclusive method / counterexample" should get an opposes edge
+1. Scan confirmed_nodes — any pair that forms "opposing stance / competing theory / mutually exclusive method / counterexample" is a candidate
 2. Typical opposition patterns:
    - Internal belief ↔ external competing theory (e.g., "embodied cognition" ↔ "pure cognitivism")
    - Method A ↔ Method B (when mutually exclusive in goal)
    - Principle A ↔ Principle B (when mechanistically opposed)
-3. Even if raw_entry has no explicit "opposition," if an external node academically competes with an internal node, build the opposes edge (use domain knowledge as evidence)
-4. For every internal node, evaluate: "does it have an opposing node in confirmed_nodes?"
+3. For every internal node, evaluate: "does it have an opposing node in confirmed_nodes?" — but the answer "yes" only authorizes building the edge if its origin combination passes the evidence rule below.
 
-## Evidence rules (by node origin)
-- **Both ends internal**: evidence must be a verbatim fragment from raw_entry; no raw text = no edge
-- **At least one end external**: evidence may be domain knowledge, e.g., "external concept A is the classic opposite of internal concept B"
+## Evidence rules — STRICTLY by origin combination
+
+These rules are non-negotiable. Do NOT fabricate verbatim quotes. If both criteria fail, simply skip the edge.
+
+| Origin combination | Allowed evidence sources | If raw has no support |
+|---|---|---|
+| **internal ↔ internal** | Verbatim fragment from raw_entry ONLY | **Skip the edge** — do NOT use domain knowledge for internal pairs |
+| **internal ↔ external** | Verbatim fragment OR domain knowledge | Use domain knowledge (e.g., "external concept A is the classic opposite of internal concept B") |
+| **external ↔ external** | Verbatim fragment OR domain knowledge | Use domain knowledge |
+
+The `evidence` field's first 6 characters MUST follow these prefixes so the rule is auditable:
+- `"raw: …"` if quoting raw_entry verbatim
+- `"dom: …"` if citing domain knowledge
+
+Anything else will be treated as a schema violation.
+
+Other constraints:
 - At most one edge per node pair; cross-domain connections are especially valuable
 - similar / related relations are handled algorithmically — do not output relation_type="similar" or "related"
 - Only output confidence (0-1); weight is computed by the system
@@ -50,7 +63,7 @@ ${subgraph}
       "relation_type": "supports|opposes|derives",
       "direction":     "A→B|B→A|bidirectional",
       "confidence":    <0-1>,
-      "evidence":      "<verbatim fragment or domain knowledge description — required>"
+      "evidence":      "raw: <verbatim from raw_entry> | dom: <domain knowledge> — required, see Evidence rules"
     }
   ]
 }

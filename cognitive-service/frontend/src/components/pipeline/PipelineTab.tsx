@@ -1,5 +1,5 @@
 import { useState, useMemo } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import {
   fetchPipelineEntries, fetchPipelineHealth, fetchEntryTrace, fetchEntry, replayProfileMerge, replayNodeStrength,
   fetchBackbones,
@@ -26,15 +26,20 @@ export function PipelineTab() {
     queryFn:  () => fetchPipelineHealth(100),
   })
   const effectiveId = selectedId ?? entries[0]?.id ?? null
-  const { data: traceData, isLoading: traceLoading } = useQuery({
+  const { data: traceData, isLoading: traceLoading, isFetching: traceFetching } = useQuery({
     queryKey: ['pipeline-trace', effectiveId],
     queryFn:  () => fetchEntryTrace(effectiveId!),
     enabled:  effectiveId !== null,
+    // Keep showing the previous entry's trace while the new one loads.
+    // Prevents the right pane from collapsing to "No trace" mid-switch and
+    // causing the Tools section to jump.
+    placeholderData: keepPreviousData,
   })
   const { data: entryDetail } = useQuery({
     queryKey: ['pipeline-entry-detail', effectiveId],
     queryFn:  () => fetchEntry(effectiveId!),
     enabled:  effectiveId !== null,
+    placeholderData: keepPreviousData,
   })
 
   return (
@@ -103,16 +108,20 @@ export function PipelineTab() {
           <HealthTable rows={health?.by_dimension ?? []} />
         </Section>
 
-        {/* 2. Trace drill-down — main debug / recall surface */}
+        {/* 2. Trace drill-down — main debug / recall surface.
+            min-height stops the Tools section below from jumping when the
+            selected entry has a smaller trace than the previous one. */}
         <Section
           icon={<Activity size={14} />}
           title={t('pipeline.trace_title')}
-          subtitle={effectiveId ? `entry #${effectiveId}` : t('pipeline.trace_no_entry_selected')}
+          subtitle={effectiveId ? `entry #${effectiveId}${traceFetching && !traceLoading ? ' · refreshing…' : ''}` : t('pipeline.trace_no_entry_selected')}
         >
-          {traceLoading && <div style={{ fontSize: 12, color: 'var(--text3)', padding: 8 }}>{t('common.loading')}</div>}
-          {!traceLoading && traceData?.trace
-            ? <TraceDetail trace={traceData.trace} raw={entryDetail?.entry?.raw || ''} />
-            : <div style={{ fontSize: 12, color: 'var(--text3)', padding: 8 }}>{t('pipeline.no_trace')}</div>}
+          <div style={{ minHeight: 480 }}>
+            {traceLoading && <div style={{ fontSize: 12, color: 'var(--text3)', padding: 8 }}>{t('common.loading')}</div>}
+            {!traceLoading && traceData?.trace
+              ? <TraceDetail trace={traceData.trace} raw={entryDetail?.entry?.raw || ''} />
+              : !traceLoading && <div style={{ fontSize: 12, color: 'var(--text3)', padding: 8 }}>{t('pipeline.no_trace')}</div>}
+          </div>
         </Section>
 
         {/* 3. Tools — algorithm tuning utilities (Profile/Strength replay), collapsible */}

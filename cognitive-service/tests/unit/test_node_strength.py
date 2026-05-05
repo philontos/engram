@@ -180,3 +180,26 @@ class TestReplayNodeStrength:
         assert stats.hist_buckets["1-1.5"] == 1  # medium
         assert stats.hist_buckets[">=5"] == 1    # strong
         assert stats.max_strength > 5.0
+
+    def test_dry_run_does_not_modify_db(self, db):
+        base = datetime(2024, 1, 1, tzinfo=timezone.utc)
+        node_id = _seed_node_with_activations("psychology", "test", [
+            (0.7, base),
+            (0.7, base + timedelta(days=1)),
+        ])
+
+        # Set a sentinel value so we can detect any write
+        with get_conn() as conn:
+            conn.execute("UPDATE backbone_nodes SET strength = 99.0 WHERE id=?", (node_id,))
+
+        from scripts.replay_node_strength import replay
+        stats = replay(domain="psychology", dry_run=True)
+
+        # Stats reflect would-be result
+        assert stats.activations_replayed == 2
+        assert stats.max_strength > 0
+
+        # But DB unchanged
+        with get_conn() as conn:
+            row = conn.execute("SELECT strength FROM backbone_nodes WHERE id=?", (node_id,)).fetchone()
+        assert row["strength"] == 99.0, "dry_run should not modify DB"

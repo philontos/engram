@@ -1,20 +1,21 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  fetchPipelineEntries, fetchPipelineHealth, fetchEntryTrace, replayProfileMerge, replayNodeStrength,
+  fetchPipelineEntries, fetchPipelineHealth, fetchEntryTrace, fetchEntry, replayProfileMerge, replayNodeStrength,
   fetchBackbones,
 } from '@/api'
 import type { PipelineHealthRow, ReplayResult, NodeStrengthReplayResult } from '@/api'
-import type { TraceData } from '@/types'
 import { fmtTime } from '@/lib/utils'
 import { useDimensionSchemas } from '@/lib/useDimensionSchemas'
 import { useI18n } from '@/i18n'
-import { RefreshCw, Activity, BarChart3, Zap } from 'lucide-react'
+import { RefreshCw, Activity, BarChart3, Wrench, ChevronDown, ChevronRight } from 'lucide-react'
+import { TraceDetail } from './TraceDetail'
 
 export function PipelineTab() {
   const { t } = useI18n()
   const qc = useQueryClient()
   const [selectedId, setSelectedId] = useState<number | null>(null)
+  const [toolsOpen, setToolsOpen] = useState(false)
 
   const { data: entries = [] } = useQuery({
     queryKey: ['pipeline-entries'],
@@ -28,6 +29,11 @@ export function PipelineTab() {
   const { data: traceData, isLoading: traceLoading } = useQuery({
     queryKey: ['pipeline-trace', effectiveId],
     queryFn:  () => fetchEntryTrace(effectiveId!),
+    enabled:  effectiveId !== null,
+  })
+  const { data: entryDetail } = useQuery({
+    queryKey: ['pipeline-entry-detail', effectiveId],
+    queryFn:  () => fetchEntry(effectiveId!),
     enabled:  effectiveId !== null,
   })
 
@@ -83,17 +89,7 @@ export function PipelineTab() {
 
       {/* Right: detail */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
-        {/* Profile merge replay */}
-        <Section icon={<Zap size={14} />} title={t('pipeline.replay_title')} subtitle={t('pipeline.replay_subtitle')}>
-          <ReplayPanel onDone={() => { qc.invalidateQueries({ queryKey: ['pipeline-health'] }); qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['profile-evolution'] }) }} />
-        </Section>
-
-        {/* Node strength replay */}
-        <Section icon={<Zap size={14} />} title={t('pipeline.strength_replay_title')} subtitle={t('pipeline.strength_replay_subtitle')}>
-          <NodeStrengthReplayPanel onDone={() => { qc.invalidateQueries({ queryKey: ['graph'] }) }} />
-        </Section>
-
-        {/* Health metrics */}
+        {/* 1. Health metrics — daily monitoring tool, place at top */}
         <Section
           icon={<BarChart3 size={14} />}
           title={t('pipeline.health_title')}
@@ -107,14 +103,55 @@ export function PipelineTab() {
           <HealthTable rows={health?.by_dimension ?? []} />
         </Section>
 
-        {/* Timeline */}
-        <Section icon={<Activity size={14} />} title={t('pipeline.timeline_title')} subtitle={effectiveId ? `entry #${effectiveId}` : ''}>
+        {/* 2. Trace drill-down — main debug / recall surface */}
+        <Section
+          icon={<Activity size={14} />}
+          title={t('pipeline.trace_title')}
+          subtitle={effectiveId ? `entry #${effectiveId}` : t('pipeline.trace_no_entry_selected')}
+        >
           {traceLoading && <div style={{ fontSize: 12, color: 'var(--text3)', padding: 8 }}>{t('common.loading')}</div>}
           {!traceLoading && traceData?.trace
-            ? <Timeline trace={traceData.trace} />
+            ? <TraceDetail trace={traceData.trace} raw={entryDetail?.entry?.raw || ''} />
             : <div style={{ fontSize: 12, color: 'var(--text3)', padding: 8 }}>{t('pipeline.no_trace')}</div>}
         </Section>
+
+        {/* 3. Tools — algorithm tuning utilities (Profile/Strength replay), collapsible */}
+        <Section
+          icon={<Wrench size={14} />}
+          title={t('pipeline.tools_title')}
+          subtitle={t('pipeline.tools_subtitle')}
+          right={
+            <button onClick={() => setToolsOpen(v => !v)} className="btn btn-ghost" style={{ fontSize: 11, padding: '2px 8px', display: 'flex', alignItems: 'center', gap: 4 }}>
+              {toolsOpen ? <ChevronDown size={11} /> : <ChevronRight size={11} />}
+              {toolsOpen ? t('pipeline.tools_hide') : t('pipeline.tools_show')}
+            </button>
+          }
+        >
+          {toolsOpen && (
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 14 }}>
+              <SubSection title={t('pipeline.replay_title')} subtitle={t('pipeline.replay_subtitle')}>
+                <ReplayPanel onDone={() => { qc.invalidateQueries({ queryKey: ['pipeline-health'] }); qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['profile-evolution'] }) }} />
+              </SubSection>
+              <SubSection title={t('pipeline.strength_replay_title')} subtitle={t('pipeline.strength_replay_subtitle')}>
+                <NodeStrengthReplayPanel onDone={() => { qc.invalidateQueries({ queryKey: ['graph'] }) }} />
+              </SubSection>
+            </div>
+          )}
+        </Section>
       </div>
+    </div>
+  )
+}
+
+
+// ── Sub-section wrapper inside Tools ─────────────────────────────────────────
+
+function SubSection({ title, subtitle, children }: { title: string; subtitle?: string; children: React.ReactNode }) {
+  return (
+    <div style={{ padding: '10px 12px', background: 'var(--surface2)', border: '1px solid var(--border)', borderRadius: 6 }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{title}</div>
+      {subtitle && <div style={{ fontSize: 10, color: 'var(--text3)', marginTop: 2, marginBottom: 8, lineHeight: 1.5 }}>{subtitle}</div>}
+      {children}
     </div>
   )
 }
@@ -154,7 +191,7 @@ function ReplayPanel({ onDone }: { onDone: () => void }) {
   const [dim, setDim]       = useState<string>('')
   const [limit, setLimit]   = useState<string>('')
   const [busy, setBusy]     = useState(false)
-  const [result, setResult] = useState<ReplayResult | null>(null)
+  const [result, setResult] = useState<(ReplayResult & { dry_run?: boolean }) | null>(null)
   const [err, setErr]       = useState<string>('')
 
   const scoreDims = useMemo(
@@ -162,15 +199,15 @@ function ReplayPanel({ onDone }: { onDone: () => void }) {
     [schemas],
   )
 
-  async function run() {
+  async function run(dryRun: boolean) {
     setBusy(true); setResult(null); setErr('')
     try {
-      const opts: { dimension?: string; limit?: number } = {}
+      const opts: { dimension?: string; limit?: number; dry_run?: boolean } = { dry_run: dryRun }
       if (dim) opts.dimension = dim
       if (limit) opts.limit = parseInt(limit, 10)
       const r = await replayProfileMerge(opts)
       setResult(r)
-      onDone()
+      if (!dryRun) onDone()
     } catch (e) {
       setErr(String(e))
     } finally {
@@ -180,11 +217,11 @@ function ReplayPanel({ onDone }: { onDone: () => void }) {
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         <select value={dim} onChange={e => setDim(e.target.value)} disabled={busy}
           style={{
-            fontSize: 12, padding: '6px 10px', borderRadius: 6,
-            background: 'var(--surface2)', border: '1px solid var(--border2)', color: 'var(--text)',
+            fontSize: 11, padding: '5px 8px', borderRadius: 6,
+            background: 'var(--surface)', border: '1px solid var(--border2)', color: 'var(--text)',
           }}>
           <option value="">{t('pipeline.replay_dimension_all')}</option>
           {scoreDims.map(s => <option key={s.key} value={s.key}>{s.name || s.key}</option>)}
@@ -192,15 +229,21 @@ function ReplayPanel({ onDone }: { onDone: () => void }) {
         <input type="number" min="1" placeholder={t('pipeline.replay_limit_all')}
           value={limit} onChange={e => setLimit(e.target.value)} disabled={busy}
           style={{
-            fontSize: 12, padding: '6px 10px', borderRadius: 6, width: 130,
-            background: 'var(--surface2)', border: '1px solid var(--border2)', color: 'var(--text)',
+            fontSize: 11, padding: '5px 8px', borderRadius: 6, width: 100,
+            background: 'var(--surface)', border: '1px solid var(--border2)', color: 'var(--text)',
           }}/>
-        <button onClick={run} disabled={busy} className="btn btn-primary" style={{ fontSize: 12 }}>
-          {busy ? t('pipeline.replay_running') : t('pipeline.replay_button')}
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+        <button onClick={() => run(true)} disabled={busy} className="btn btn-ghost" style={{ fontSize: 11 }}>
+          {busy ? t('pipeline.replay_running') : t('pipeline.replay_preview_button')}
+        </button>
+        <button onClick={() => run(false)} disabled={busy} className="btn btn-primary" style={{ fontSize: 11 }}>
+          {busy ? t('pipeline.replay_running') : t('pipeline.replay_apply_button')}
         </button>
       </div>
       {result && (
-        <div style={{ marginTop: 10, fontSize: 11, color: 'var(--engram-accent-success)' }}>
+        <div style={{ marginTop: 10, fontSize: 11, color: result.dry_run ? 'var(--text2)' : 'var(--engram-accent-success)' }}>
+          {result.dry_run ? '(preview · DB unchanged) ' : '✓ Applied · '}
           {t('pipeline.replay_done', {
             entries: result.entries_processed,
             features: result.slice_features_replayed,
@@ -226,17 +269,17 @@ function NodeStrengthReplayPanel({ onDone }: { onDone: () => void }) {
   const { data: bbInfo } = useQuery({ queryKey: ['backbones'], queryFn: fetchBackbones })
   const [domain, setDomain]   = useState<string>('')
   const [busy, setBusy]       = useState(false)
-  const [result, setResult]   = useState<NodeStrengthReplayResult | null>(null)
+  const [result, setResult]   = useState<(NodeStrengthReplayResult & { dry_run?: boolean }) | null>(null)
   const [err, setErr]         = useState<string>('')
 
-  async function run() {
+  async function run(dryRun: boolean) {
     setBusy(true); setResult(null); setErr('')
     try {
-      const opts: { domain?: string } = {}
+      const opts: { domain?: string; dry_run?: boolean } = { dry_run: dryRun }
       if (domain) opts.domain = domain
       const r = await replayNodeStrength(opts)
       setResult(r)
-      onDone()
+      if (!dryRun) onDone()
     } catch (e) {
       setErr(String(e))
     } finally {
@@ -246,24 +289,30 @@ function NodeStrengthReplayPanel({ onDone }: { onDone: () => void }) {
 
   return (
     <div>
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' }}>
         <select value={domain} onChange={e => setDomain(e.target.value)} disabled={busy}
           style={{
-            fontSize: 12, padding: '6px 10px', borderRadius: 6,
-            background: 'var(--surface2)', border: '1px solid var(--border2)', color: 'var(--text)',
+            fontSize: 11, padding: '5px 8px', borderRadius: 6,
+            background: 'var(--surface)', border: '1px solid var(--border2)', color: 'var(--text)',
           }}>
           <option value="">{t('pipeline.strength_replay_domain_all')}</option>
           {(bbInfo?.backbones ?? []).map(b => (
             <option key={b.key} value={b.key}>{b.name || b.key}</option>
           ))}
         </select>
-        <button onClick={run} disabled={busy} className="btn btn-primary" style={{ fontSize: 12 }}>
-          {busy ? t('pipeline.replay_running') : t('pipeline.strength_replay_button')}
+      </div>
+      <div style={{ display: 'flex', gap: 6, marginTop: 8 }}>
+        <button onClick={() => run(true)} disabled={busy} className="btn btn-ghost" style={{ fontSize: 11 }}>
+          {busy ? t('pipeline.replay_running') : t('pipeline.replay_preview_button')}
+        </button>
+        <button onClick={() => run(false)} disabled={busy} className="btn btn-primary" style={{ fontSize: 11 }}>
+          {busy ? t('pipeline.replay_running') : t('pipeline.replay_apply_button')}
         </button>
       </div>
       {result && (
         <div style={{ marginTop: 10 }}>
-          <div style={{ fontSize: 11, color: 'var(--engram-accent-success)', marginBottom: 8 }}>
+          <div style={{ fontSize: 11, color: result.dry_run ? 'var(--text2)' : 'var(--engram-accent-success)', marginBottom: 8 }}>
+            {result.dry_run ? '(preview · DB unchanged) ' : '✓ Applied · '}
             {t('pipeline.strength_replay_done', {
               nodes: result.nodes_touched,
               acts: result.activations_replayed,
@@ -358,112 +407,3 @@ function ratioColor(r: number, semantic: 'good' | 'bad'): string {
 }
 
 
-// ── Pipeline timeline ────────────────────────────────────────────────────────
-
-type TraceObj = NonNullable<TraceData['trace']>
-
-function Timeline({ trace }: { trace: TraceObj }) {
-  const { t } = useI18n()
-
-  // Stage definitions — derived from what data exists in trace
-  const slice  = trace.slice
-  const prof   = trace.profile_diff
-  const health = (trace as any).slice_extraction_health as Record<string, { total: number; null_count: number; low_conf_count: number; midpoint_hedge_count: number }> | undefined
-  const act    = trace.activation
-  const ndExt  = trace.node_extract
-  const edExt  = trace.edge_extract
-  const dbDiff = trace.db_diff
-  const llm    = (trace as any).llm_summary as { count?: number; total_tokens?: number; duration_ms?: number } | undefined
-
-  type Stage = { key: string; label: string; details: React.ReactNode; status: 'done' | 'skipped' }
-  const stages: Stage[] = []
-
-  if (slice) {
-    const featureCount = Array.isArray(slice) ? slice.length : Object.keys(slice).length
-    stages.push({
-      key: 'slice', label: t('pipeline.stage_slice'), status: 'done',
-      details: (
-        <div>
-          <Tag>{t('pipeline.feature_count_n', { n: featureCount })}</Tag>
-          {health && Object.entries(health).map(([dim, h]) => (
-            <Tag key={dim} variant="muted">
-              {dim}: null={h.null_count}/{h.total} · low={h.low_conf_count} · hedge={h.midpoint_hedge_count}
-            </Tag>
-          ))}
-        </div>
-      ),
-    })
-  }
-
-  if (prof) {
-    const subdimChangedCount = Object.values(prof).reduce((acc, v) => acc + Object.keys(v).length, 0)
-    stages.push({
-      key: 'profile', label: t('pipeline.stage_profile'), status: subdimChangedCount > 0 ? 'done' : 'skipped',
-      details: <Tag>{t('pipeline.profile_changed_n', { n: subdimChangedCount })}</Tag>,
-    })
-  }
-
-  if (act || ndExt || edExt || dbDiff) {
-    const nodesNew = (dbDiff as any)?.nodes_new?.length ?? 0
-    const nodesUpd = (dbDiff as any)?.nodes_updated?.length ?? 0
-    const edgesNew = (dbDiff as any)?.edges_new?.length ?? 0
-    const edgesUpd = (dbDiff as any)?.edges_updated?.length ?? 0
-    stages.push({
-      key: 'backbone', label: t('pipeline.stage_backbone'), status: 'done',
-      details: (
-        <div>
-          <Tag>{t('pipeline.nodes_n', { n: nodesNew + nodesUpd })}</Tag>
-          <Tag>{t('pipeline.edges_n', { n: edgesNew + edgesUpd })}</Tag>
-        </div>
-      ),
-    })
-  }
-
-  if (llm) {
-    stages.push({
-      key: 'llm', label: t('pipeline.stage_done'), status: 'done',
-      details: (
-        <div>
-          <Tag>{t('pipeline.llm_calls_n', { n: llm.count ?? 0 })}</Tag>
-          {llm.total_tokens != null && <Tag variant="muted">{llm.total_tokens.toLocaleString()} tokens</Tag>}
-          {llm.duration_ms != null && <Tag variant="muted">{t('pipeline.duration_ms', { n: llm.duration_ms })}</Tag>}
-        </div>
-      ),
-    })
-  }
-
-  return (
-    <div>
-      {stages.map((s, i) => (
-        <div key={s.key} style={{
-          display: 'flex', gap: 12, padding: '10px 0',
-          borderTop: i === 0 ? 'none' : '1px solid var(--border)',
-        }}>
-          <div style={{
-            width: 28, height: 28, borderRadius: '50%', flexShrink: 0,
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            background: s.status === 'done' ? 'var(--engram-tint-primary)' : 'var(--surface2)',
-            color: s.status === 'done' ? 'var(--engram-accent-primary)' : 'var(--text3)',
-            fontSize: 11, fontWeight: 700,
-          }}>{i + 1}</div>
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 4 }}>{s.label}</div>
-            <div>{s.details}</div>
-          </div>
-        </div>
-      ))}
-    </div>
-  )
-}
-
-function Tag({ children, variant }: { children: React.ReactNode; variant?: 'muted' }) {
-  return (
-    <span style={{
-      display: 'inline-block', padding: '2px 8px', marginRight: 6, marginTop: 2,
-      borderRadius: 10, fontSize: 11,
-      background: variant === 'muted' ? 'transparent' : 'var(--engram-tint-primary)',
-      color: variant === 'muted' ? 'var(--text3)' : 'var(--engram-accent-primary)',
-      border: variant === 'muted' ? '1px solid var(--border2)' : 'none',
-    }}>{children}</span>
-  )
-}

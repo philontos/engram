@@ -88,8 +88,17 @@ const dict = {
     strength_replay_button:   '重算 node_strength',
     strength_replay_domain:   '只重算 domain',
     strength_replay_domain_all: '全部 domain',
-    strength_replay_done:     '✓ 完成：{nodes} 个节点 / 回放 {acts} 次激活 / max={max} / median={median}',
+    strength_replay_done:     '完成：{nodes} 个节点 / 回放 {acts} 次激活 / max={max} / median={median}',
     strength_distribution:    '新分布',
+    // PR #8: trace 下钻 + tools 区
+    trace_title:              '处理追踪',
+    trace_no_entry_selected:  '从左侧选择一条 entry',
+    tools_title:              '工具',
+    tools_subtitle:           '算法层调参工具：调 PROFILE_MERGE / NODE_STRENGTH 参数后零成本看新曲线（不调 LLM）。Preview = 预览不写库；Apply = 写入',
+    tools_show:               '展开',
+    tools_hide:               '收起',
+    replay_preview_button:    'Preview',
+    replay_apply_button:      'Apply',
   },
 
   stats: {

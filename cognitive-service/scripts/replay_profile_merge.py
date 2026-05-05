@@ -47,12 +47,17 @@ def _save_snapshot(entry_id: int) -> None:
         )
 
 
-def replay(dimension: str | None = None, limit: int | None = None) -> ReplayStats:
+def replay(dimension: str | None = None, limit: int | None = None, dry_run: bool = False) -> ReplayStats:
     """Wipe profile_dimensions + profile_snapshots, then re-merge from slice_features.
 
     Args:
         dimension: if given, only replay this dimension (others unchanged in DB).
         limit: if given, only replay the first N entries (oldest first).
+        dry_run: if True, perform the replay then RESTORE the affected tables to
+                 their pre-replay state. Stats are still returned (so UI can
+                 preview), but DB is unchanged. Implementation uses backup-restore
+                 since merge_dimension writes per-call; for personal-use scale this
+                 race window (~<1s) is acceptable.
 
     Returns: stats summary.
     """
@@ -68,6 +73,29 @@ def replay(dimension: str | None = None, limit: int | None = None) -> ReplayStat
                 "SELECT id FROM entries ORDER BY created_at ASC"
             ).fetchall()
     entry_ids = [r["id"] for r in entry_rows]
+
+    # 1b. Backup affected tables for dry_run restore
+    backup_dims: list[tuple] = []
+    backup_snaps: list[tuple] = []
+    if dry_run:
+        with get_conn() as conn:
+            if dimension:
+                backup_dims = [tuple(r) for r in conn.execute(
+                    "SELECT dimension, content_json, sample_count, updated_at "
+                    "FROM profile_dimensions WHERE dimension = ?",
+                    (dimension,),
+                ).fetchall()]
+            else:
+                backup_dims = [tuple(r) for r in conn.execute(
+                    "SELECT dimension, content_json, sample_count, updated_at FROM profile_dimensions"
+                ).fetchall()]
+            if entry_ids:
+                placeholders = ",".join(["?"] * len(entry_ids))
+                backup_snaps = [tuple(r) for r in conn.execute(
+                    f"SELECT entry_id, snapshot_json, created_at FROM profile_snapshots "
+                    f"WHERE entry_id IN ({placeholders})",
+                    entry_ids,
+                ).fetchall()]
 
     # 2. Wipe derived state (only the dimensions we'll touch, to be safe)
     with get_conn() as conn:
@@ -87,37 +115,63 @@ def replay(dimension: str | None = None, limit: int | None = None) -> ReplayStat
     sf_count = 0
     dims_touched: set[str] = set()
     snaps = 0
-    for entry_id in entry_ids:
-        with get_conn() as conn:
-            if dimension:
-                feats = conn.execute(
-                    """SELECT sf.dimension, sf.content_json
-                       FROM slice_features sf
-                       JOIN slices s ON s.id = sf.slice_id
-                       WHERE s.entry_id = ? AND sf.dimension = ?""",
-                    (entry_id, dimension),
-                ).fetchall()
-            else:
-                feats = conn.execute(
-                    """SELECT sf.dimension, sf.content_json
-                       FROM slice_features sf
-                       JOIN slices s ON s.id = sf.slice_id
-                       WHERE s.entry_id = ?""",
-                    (entry_id,),
-                ).fetchall()
+    try:
+        for entry_id in entry_ids:
+            with get_conn() as conn:
+                if dimension:
+                    feats = conn.execute(
+                        """SELECT sf.dimension, sf.content_json
+                           FROM slice_features sf
+                           JOIN slices s ON s.id = sf.slice_id
+                           WHERE s.entry_id = ? AND sf.dimension = ?""",
+                        (entry_id, dimension),
+                    ).fetchall()
+                else:
+                    feats = conn.execute(
+                        """SELECT sf.dimension, sf.content_json
+                           FROM slice_features sf
+                           JOIN slices s ON s.id = sf.slice_id
+                           WHERE s.entry_id = ?""",
+                        (entry_id,),
+                    ).fetchall()
 
-        for f in feats:
-            try:
-                content = json.loads(f["content_json"])
-            except Exception:
-                continue
-            merge_dimension(f["dimension"], content, entry_id=entry_id)
-            sf_count += 1
-            dims_touched.add(f["dimension"])
+            for f in feats:
+                try:
+                    content = json.loads(f["content_json"])
+                except Exception:
+                    continue
+                merge_dimension(f["dimension"], content, entry_id=entry_id)
+                sf_count += 1
+                dims_touched.add(f["dimension"])
 
-        if feats:
-            _save_snapshot(entry_id)
-            snaps += 1
+            if feats:
+                _save_snapshot(entry_id)
+                snaps += 1
+    finally:
+        # 4. Dry-run restore (always run if we backed up, even on exception, so
+        # a mid-replay error never leaves the user's DB in a half-replayed state)
+        if dry_run:
+            with get_conn() as conn:
+                if dimension:
+                    conn.execute("DELETE FROM profile_dimensions WHERE dimension = ?", (dimension,))
+                else:
+                    conn.execute("DELETE FROM profile_dimensions")
+                for row in backup_dims:
+                    conn.execute(
+                        "INSERT INTO profile_dimensions (dimension, content_json, sample_count, updated_at) VALUES (?, ?, ?, ?)",
+                        row,
+                    )
+                if entry_ids:
+                    placeholders = ",".join(["?"] * len(entry_ids))
+                    conn.execute(
+                        f"DELETE FROM profile_snapshots WHERE entry_id IN ({placeholders})",
+                        entry_ids,
+                    )
+                for row in backup_snaps:
+                    conn.execute(
+                        "INSERT INTO profile_snapshots (entry_id, snapshot_json, created_at) VALUES (?, ?, ?)",
+                        row,
+                    )
 
     return ReplayStats(
         entries_processed=len(entry_ids),
@@ -131,9 +185,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0] if __doc__ else "")
     ap.add_argument("--dimension", help="Only replay this dimension (e.g. ocean)")
     ap.add_argument("--limit", type=int, help="Only replay the first N entries (oldest first)")
+    ap.add_argument("--dry-run", action="store_true", help="Preview only; restore tables after replay (DB unchanged)")
     args = ap.parse_args()
 
-    stats = replay(dimension=args.dimension, limit=args.limit)
+    stats = replay(dimension=args.dimension, limit=args.limit, dry_run=args.dry_run)
     print(f"entries_processed       : {stats.entries_processed}")
     print(f"slice_features_replayed : {stats.slice_features_replayed}")
     print(f"dimensions_touched      : {stats.dimensions_touched}")

@@ -94,3 +94,25 @@ class TestReplay:
 
         assert stats.entries_processed == 2
         assert stats.snapshots_written == 2
+
+    def test_dry_run_does_not_modify_db(self, db):
+        # Seed a baseline state, then run dry_run replay, then verify state unchanged
+        merge_dimension("ocean", {"E": {"score": 30, "confidence": 0.9, "evidence": "baseline"}})
+        with get_conn() as conn:
+            before = conn.execute("SELECT content_json FROM profile_dimensions WHERE dimension='ocean'").fetchone()
+        before_json = before["content_json"]
+
+        # Seed slice_features that, if applied, would shift the score significantly
+        for x in [80, 80, 80]:
+            _seed_entry([("ocean", {"E": {"score": x, "confidence": 0.9, "evidence": "would shift"}})])
+
+        from scripts.replay_profile_merge import replay
+        stats = replay(dry_run=True)
+
+        # Stats reflect the would-be replay
+        assert stats.entries_processed >= 3
+
+        # But DB is unchanged
+        with get_conn() as conn:
+            after = conn.execute("SELECT content_json FROM profile_dimensions WHERE dimension='ocean'").fetchone()
+        assert after["content_json"] == before_json, "dry_run should not modify DB"

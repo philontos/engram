@@ -300,6 +300,11 @@ async def chat_json(
                 "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
                 "duration_ms": duration_ms, "context": context or {},
                 "status": "http_error", "error": f"status={resp.status_code}",
+                # Full I/O capture for trace debug (PR #8): system_prompt only —
+                # response is the error body, included separately.
+                "system_prompt": system_prompt or "",
+                "user_prompt":   user_prompt or "",
+                "response":      resp.text[:4000],
             })
             raise StructuredLLMError(
                 f"Structured extraction LLM failed: status={resp.status_code} body={resp.text[:400]}"
@@ -307,6 +312,25 @@ async def chat_json(
 
         data = resp.json()
         usage = data.get("usage") or {}
+
+        # Extract response content for both record AND return value
+        try:
+            response_content = data["choices"][0]["message"]["content"]
+        except (KeyError, IndexError, TypeError) as exc:
+            _record_llm_call({
+                "stage": stage or "unknown", "model": config["model"],
+                "prompt_chars": prompt_chars,
+                "prompt_tokens": int(usage.get("prompt_tokens", 0)),
+                "completion_tokens": int(usage.get("completion_tokens", 0)),
+                "total_tokens": int(usage.get("total_tokens", 0)),
+                "duration_ms": duration_ms, "context": context or {},
+                "status": "shape_error", "error": str(exc)[:200],
+                "system_prompt": system_prompt or "",
+                "user_prompt":   user_prompt or "",
+                "response":      str(data)[:4000],
+            })
+            raise StructuredLLMError("Structured extraction LLM returned an unexpected response shape.") from exc
+
         _record_llm_call({
             "stage": stage or "unknown", "model": config["model"],
             "prompt_chars": prompt_chars,
@@ -315,14 +339,14 @@ async def chat_json(
             "total_tokens": int(usage.get("total_tokens", 0)),
             "duration_ms": duration_ms, "context": context or {},
             "status": "ok",
+            # Full I/O capture for trace debug (PR #8): enables left-outline /
+            # right-detail trace inspector to show what the LLM saw + returned.
+            "system_prompt": system_prompt or "",
+            "user_prompt":   user_prompt or "",
+            "response":      response_content,
         })
 
-        try:
-            content = data["choices"][0]["message"]["content"]
-        except (KeyError, IndexError, TypeError) as exc:
-            raise StructuredLLMError("Structured extraction LLM returned an unexpected response shape.") from exc
-
-        return _extract_json_object(content)
+        return _extract_json_object(response_content)
     except StructuredLLMError:
         raise
     except Exception as exc:
@@ -333,6 +357,9 @@ async def chat_json(
             "duration_ms": int((time.monotonic() - start) * 1000),
             "context": context or {},
             "status": "exception", "error": str(exc)[:200],
+            "system_prompt": system_prompt or "",
+            "user_prompt":   user_prompt or "",
+            "response":      "",
         })
         raise
 

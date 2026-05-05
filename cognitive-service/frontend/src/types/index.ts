@@ -196,26 +196,68 @@ export interface Stats {
 
 // ── Trace ─────────────────────────────────────────────────────────────────────
 
+export interface LLMCallRecord {
+  stage: string
+  model: string
+  prompt_chars: number
+  prompt_tokens: number
+  completion_tokens: number
+  total_tokens: number
+  duration_ms: number
+  context: Record<string, unknown>
+  status: 'ok' | 'http_error' | 'exception' | 'shape_error' | string
+  error?: string
+  // Full I/O capture (PR #8) — present for chat_json calls; older traces may
+  // be missing these fields, callers should default to empty string.
+  system_prompt?: string
+  user_prompt?: string
+  response?: string
+}
+
+export interface ExtractionHealthPerDim {
+  total: number
+  null_count: number
+  low_conf_count: number
+  midpoint_hedge_count: number
+}
+
 export interface TraceData {
   entry_id: number
   updated_at?: string
   trace: {
     slice?: Record<string, { content: Record<string, unknown>; confidence: number }>
     profile_diff?: Record<string, Record<string, unknown>>
+    slice_extraction_health?: Record<string, ExtractionHealthPerDim>
+
     activation?: Record<string, number>
     rough_retrieval?: Array<{ label: string; domain: string; node_type: string; strength: number; sim: number }>
+
+    /** Legacy shape (kept for back-compat); newer pipeline writes node_extract_internal / _external separately. */
     node_extract?: Record<string, Array<{ label: string; node_type: string; confidence: number; description?: string }>>
-    confirmed_nodes?: Array<{ label: string; domain: string; node_type: string; is_new: boolean; strength: number; new_conf?: number }>
+    node_extract_internal?: Record<string, Array<{ label: string; node_type: string; confidence: number; description?: string; user_relevance?: string }>>
+    node_extract_external?: Record<string, Array<{ label: string; node_type: string; confidence: number; description?: string; user_relevance?: string }>>
+
+    confirmed_nodes?: Array<{ label: string; domain: string; node_type: string; is_new: boolean; strength: number; new_conf?: number; origin?: string; id?: number }>
     subgraph?: {
-      nodes: Array<{ label: string; domain: string; strength: number }>
+      nodes: Array<{ label: string; domain: string; strength: number; id?: number }>
       edges: Array<{ from_label: string; to_label: string; relation_type: string; weight: number }>
     }
     edge_extract?: Array<{ from_label: string; to_label: string; relation_type: string; direction: string; confidence: number; evidence?: string }>
+    algo_edges?: unknown[]
+    association_edges?: unknown[]
+    opposition_propagation?: unknown[]
+
     db_diff?: {
       nodes_new: Array<{ id: number; label: string; domain: string; node_type: string; strength: number }>
       nodes_updated: Array<{ label: string; domain: string; strength_before: number; strength_after: number }>
       edges_new: Array<{ from_label: string; to_label: string; relation_type: string; weight: number }>
       edges_updated: Array<{ from_label: string; to_label: string; relation_type: string; weight_before: number; weight_after: number }>
     }
+
+    llm_calls?: LLMCallRecord[]
+    llm_summary?: { count: number; total_tokens: number; duration_ms: number; failures: number }
+    metrics?: Record<string, number>
+    duration_ms?: number
+    finished_at?: string
   } | null
 }

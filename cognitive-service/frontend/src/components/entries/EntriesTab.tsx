@@ -81,12 +81,33 @@ export function EntriesTab() {
     finally { setCapturing(false) }
   }
 
-  async function startProcessStream(entryId: number) {
+  /**
+   * Subscribe to the process event stream.
+   *
+   * triggerFirst: if true, POST /start to actually kick off processing before
+   * subscribing. Use this for the manual Process button on entries that already
+   * exist in DB (captured / failed / reverted). For freshly-captured entries
+   * the /capture endpoint already triggers internally, so leave it false.
+   */
+  async function startProcessStream(entryId: number, triggerFirst = false) {
     processAbortRef.current?.abort()
     const ac = new AbortController()
     processAbortRef.current = ac
     setProcessEntryId(entryId); setProcessEvents([]); setProcessDone(false)
     try {
+      if (triggerFirst) {
+        const startRes = await fetch(`/entries/${entryId}/process/start`, {
+          method: 'POST', signal: ac.signal,
+        })
+        if (!startRes.ok) {
+          // 409 means already processing/processed — fall through to subscribe
+          // (which will replay the events). Other errors → bail out cleanly.
+          if (startRes.status !== 409) {
+            setProcessDone(true)
+            return
+          }
+        }
+      }
       const res = await fetch(`/entries/${entryId}/process/stream`, { signal: ac.signal })
       if (!res.ok || !res.body) return
       const reader = res.body.getReader()
@@ -238,7 +259,7 @@ export function EntriesTab() {
                         || e.processing_status === 'slice_failed'
                         || e.processing_status === 'failed'
                         || e.processing_status === 'reverted') && (
-                        <button onClick={ev => { ev.stopPropagation(); startProcessStream(e.id) }}
+                        <button onClick={ev => { ev.stopPropagation(); startProcessStream(e.id, true) }}
                           disabled={processEntryId === e.id && !processDone}
                           title={t('entries.process')}
                           style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 6, border: '1px solid var(--engram-accent-primary)', cursor: 'pointer', background: 'var(--engram-tint-primary)', color: 'var(--engram-accent-primary)', fontSize: 11, opacity: (processEntryId === e.id && !processDone) ? 0.5 : 1 }}>

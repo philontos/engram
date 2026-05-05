@@ -83,6 +83,13 @@ const dict = {
     nodes_n:              '{n} 个节点',
     edges_n:              '{n} 条边',
     none_yet:             '—',
+    strength_replay_title:    '节点 Strength Replay',
+    strength_replay_subtitle: '从 backbone_activations 重算 strength（DWAS 公式），零 LLM 调用。改了节点强度算法或参数后用',
+    strength_replay_button:   '重算 node_strength',
+    strength_replay_domain:   '只重算 domain',
+    strength_replay_domain_all: '全部 domain',
+    strength_replay_done:     '✓ 完成：{nodes} 个节点 / 回放 {acts} 次激活 / max={max} / median={median}',
+    strength_distribution:    '新分布',
   },
 
   stats: {

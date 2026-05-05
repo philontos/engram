@@ -173,3 +173,18 @@ export const replayProfileMerge = (opts: { dimension?: string; limit?: number } 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(opts),
   })
+
+export type NodeStrengthReplayResult = {
+  nodes_touched: number
+  activations_replayed: number
+  max_strength: number
+  median_strength: number
+  histogram: Record<string, number>
+}
+
+export const replayNodeStrength = (opts: { domain?: string } = {}) =>
+  req<NodeStrengthReplayResult>('/ui/api/admin/replay/node-strength', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(opts),
+  })

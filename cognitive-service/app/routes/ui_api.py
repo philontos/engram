@@ -1021,3 +1021,25 @@ def admin_replay_profile_merge(req: ReplayRequest):
         "dimensions_touched":      stats.dimensions_touched,
         "snapshots_written":       stats.snapshots_written,
     }
+
+
+class ReplayNodeStrengthRequest(BaseModel):
+    domain: str | None = None
+
+
+@router.post("/admin/replay/node-strength")
+def admin_replay_node_strength(req: ReplayNodeStrengthRequest):
+    """从 backbone_activations 重算 backbone_nodes.strength（DWAS 公式），零 LLM 调用。
+
+    用于：改了 _update_node_strength 公式或 NODE_STRENGTH 配置后，想在已有数据上
+    看新分布。返回值含直方图，可直接用来校准下游 strength 阈值。
+    """
+    from scripts.replay_node_strength import replay
+    stats = replay(domain=req.domain)
+    return {
+        "nodes_touched":        stats.nodes_touched,
+        "activations_replayed": stats.activations_replayed,
+        "max_strength":         stats.max_strength,
+        "median_strength":      stats.median_strength,
+        "histogram":            stats.hist_buckets,
+    }

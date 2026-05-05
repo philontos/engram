@@ -1,10 +1,8 @@
-"""节点强度时间衰减公式测试。
+"""时间衰减公式测试（NODE_STRENGTH 与 EDGE_DECAY 共享 exp(-λ × days) 的形态）。
 
-公式定义在 backbone_pipeline._update_node_strength。改动 NODE_STRENGTH 参数
-时这里会挂，提醒你后果。
-
-注意：profile_merge 已切换到贝叶斯递推（见 test_profile_merge.py），不再共用
-此处的 freq_bonus / alpha 公式。
+注意：profile_merge 已切到贝叶斯递推（见 test_profile_merge.py），node_strength
+已切到 DWAS（见 test_node_strength.py），不再共用旧的 freq_bonus / alpha 公式。
+本文件只保留两组核心 exp 衰减性质的回归测试。
 """
 
 import math
@@ -12,26 +10,13 @@ import pytest
 from app.config.graph_rules import NODE_STRENGTH, EDGE_DECAY
 
 
-# ── 共用的纯公式（与生产代码保持一致）─────────────────────────────────────────
-
 def _time_decay(days: int, lam: float) -> float:
     return math.exp(-lam * days)
 
-def _freq_bonus(hit_count: int) -> float:
-    return 1.0 + math.log(1.0 + hit_count)
 
-def _alpha(old_strength: float, new_conf: float, hist_weight: float) -> float:
-    hist_effective = hist_weight * old_strength
-    denom = hist_effective + new_conf
-    return new_conf / denom if denom > 0 else 1.0
+# ── 节点 strength 时间衰减 ──────────────────────────────────────────────────
 
-def _new_strength(old: float, alpha: float, new_conf: float) -> float:
-    return (1 - alpha) * old + alpha * new_conf
-
-
-# ── 时间衰减 ────────────────────────────────────────────────────────────────
-
-class TestTimeDecay:
+class TestNodeTimeDecay:
     lam = NODE_STRENGTH["lambda"]  # 0.01
 
     def test_no_time_passed(self):
@@ -47,87 +32,6 @@ class TestTimeDecay:
         result = _time_decay(365, self.lam)
         assert result == pytest.approx(math.exp(-0.01 * 365), rel=1e-6)
         assert result < 0.03
-
-
-# ── 频次加成 ────────────────────────────────────────────────────────────────
-
-class TestFreqBonus:
-    def test_zero_hits(self):
-        # 0 次：log(1) = 0，freq_bonus = 1.0
-        assert _freq_bonus(0) == pytest.approx(1.0)
-
-    def test_one_hit(self):
-        assert _freq_bonus(1) == pytest.approx(1.0 + math.log(2))
-
-    def test_growth_slows_down(self):
-        # 增长越来越慢：等宽区间内的增量递减
-        d1 = _freq_bonus(10) - _freq_bonus(0)   # 区间宽度 10
-        d2 = _freq_bonus(20) - _freq_bonus(10)  # 区间宽度 10
-        d3 = _freq_bonus(50) - _freq_bonus(40)  # 区间宽度 10
-        assert d1 > d2 > d3
-
-    def test_known_values(self):
-        # 文档注释中的参考值
-        assert _freq_bonus(10) == pytest.approx(1 + math.log(11), rel=1e-4)
-        assert _freq_bonus(50) == pytest.approx(1 + math.log(51), rel=1e-4)
-
-
-# ── Alpha 混合系数 ──────────────────────────────────────────────────────────
-
-class TestAlpha:
-    def test_no_history(self):
-        # 历史 strength=0：alpha 应为 1（全用新信号）
-        hw = _time_decay(0, 0.01) * _freq_bonus(0)
-        a = _alpha(old_strength=0.0, new_conf=0.8, hist_weight=hw)
-        assert a == pytest.approx(1.0)
-
-    def test_high_new_conf_dominates_weak_history(self):
-        # 新信号强 + 历史弱（1 条 + 365 天）→ alpha 大
-        hw = _time_decay(365, 0.01) * _freq_bonus(1)
-        a = _alpha(old_strength=0.7, new_conf=0.9, hist_weight=hw)
-        assert a > 0.8
-
-    def test_low_new_conf_loses_to_strong_history(self):
-        # 新信号弱 + 历史强（10 条 + 0 天）→ alpha 小
-        hw = _time_decay(0, 0.01) * _freq_bonus(10)
-        a = _alpha(old_strength=0.8, new_conf=0.3, hist_weight=hw)
-        assert a < 0.15
-
-    def test_alpha_range(self):
-        # alpha 始终在 (0, 1]
-        for hit_count in [0, 5, 50]:
-            for days in [0, 30, 180]:
-                hw = _time_decay(days, 0.01) * _freq_bonus(hit_count)
-                a = _alpha(0.7, 0.5, hw)
-                assert 0.0 < a <= 1.0
-
-
-# ── 强度更新 ─────────────────────────────────────────────────────────────────
-
-class TestStrengthUpdate:
-    def test_first_hit_equals_new_conf(self):
-        # 首次命中（old=0, hit_count=0, days=0）→ strength = new_conf
-        hw = _time_decay(0, 0.01) * _freq_bonus(0)
-        a = _alpha(0.0, 0.8, hw)
-        assert _new_strength(0.0, a, 0.8) == pytest.approx(0.8)
-
-    def test_strength_moves_toward_new(self):
-        # 有历史时，新 strength 介于 old 和 new_conf 之间
-        old = 0.6
-        new_conf = 0.9
-        hw = _time_decay(30, 0.01) * _freq_bonus(5)
-        a = _alpha(old, new_conf, hw)
-        result = _new_strength(old, a, new_conf)
-        assert old < result < new_conf
-
-    def test_very_stale_history_overridden(self):
-        # 历史很久远（500 天）+ 新信号高置信 → 应明显向新信号靠拢
-        old = 0.3
-        new_conf = 0.9
-        hw = _time_decay(500, 0.01) * _freq_bonus(3)
-        a = _alpha(old, new_conf, hw)
-        result = _new_strength(old, a, new_conf)
-        assert result > 0.7
 
 
 # ── Edge 消费时衰减 ──────────────────────────────────────────────────────────

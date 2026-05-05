@@ -1,9 +1,10 @@
 import { useState, useMemo } from 'react'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import {
-  fetchPipelineEntries, fetchPipelineHealth, fetchEntryTrace, replayProfileMerge,
+  fetchPipelineEntries, fetchPipelineHealth, fetchEntryTrace, replayProfileMerge, replayNodeStrength,
+  fetchBackbones,
 } from '@/api'
-import type { PipelineHealthRow, ReplayResult } from '@/api'
+import type { PipelineHealthRow, ReplayResult, NodeStrengthReplayResult } from '@/api'
 import type { TraceData } from '@/types'
 import { fmtTime } from '@/lib/utils'
 import { useDimensionSchemas } from '@/lib/useDimensionSchemas'
@@ -82,9 +83,14 @@ export function PipelineTab() {
 
       {/* Right: detail */}
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'auto' }}>
-        {/* Replay panel */}
+        {/* Profile merge replay */}
         <Section icon={<Zap size={14} />} title={t('pipeline.replay_title')} subtitle={t('pipeline.replay_subtitle')}>
           <ReplayPanel onDone={() => { qc.invalidateQueries({ queryKey: ['pipeline-health'] }); qc.invalidateQueries({ queryKey: ['profile'] }); qc.invalidateQueries({ queryKey: ['profile-evolution'] }) }} />
+        </Section>
+
+        {/* Node strength replay */}
+        <Section icon={<Zap size={14} />} title={t('pipeline.strength_replay_title')} subtitle={t('pipeline.strength_replay_subtitle')}>
+          <NodeStrengthReplayPanel onDone={() => { qc.invalidateQueries({ queryKey: ['graph'] }) }} />
         </Section>
 
         {/* Health metrics */}
@@ -201,6 +207,86 @@ function ReplayPanel({ onDone }: { onDone: () => void }) {
             dims: result.dimensions_touched,
             snaps: result.snapshots_written,
           })}
+        </div>
+      )}
+      {err && (
+        <div style={{ marginTop: 10, fontSize: 11, color: 'var(--engram-accent-warning)' }}>
+          {t('pipeline.replay_failed', { error: err })}
+        </div>
+      )}
+    </div>
+  )
+}
+
+
+// ── Node strength replay panel ───────────────────────────────────────────────
+
+function NodeStrengthReplayPanel({ onDone }: { onDone: () => void }) {
+  const { t } = useI18n()
+  const { data: bbInfo } = useQuery({ queryKey: ['backbones'], queryFn: fetchBackbones })
+  const [domain, setDomain]   = useState<string>('')
+  const [busy, setBusy]       = useState(false)
+  const [result, setResult]   = useState<NodeStrengthReplayResult | null>(null)
+  const [err, setErr]         = useState<string>('')
+
+  async function run() {
+    setBusy(true); setResult(null); setErr('')
+    try {
+      const opts: { domain?: string } = {}
+      if (domain) opts.domain = domain
+      const r = await replayNodeStrength(opts)
+      setResult(r)
+      onDone()
+    } catch (e) {
+      setErr(String(e))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  return (
+    <div>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+        <select value={domain} onChange={e => setDomain(e.target.value)} disabled={busy}
+          style={{
+            fontSize: 12, padding: '6px 10px', borderRadius: 6,
+            background: 'var(--surface2)', border: '1px solid var(--border2)', color: 'var(--text)',
+          }}>
+          <option value="">{t('pipeline.strength_replay_domain_all')}</option>
+          {(bbInfo?.backbones ?? []).map(b => (
+            <option key={b.key} value={b.key}>{b.name || b.key}</option>
+          ))}
+        </select>
+        <button onClick={run} disabled={busy} className="btn btn-primary" style={{ fontSize: 12 }}>
+          {busy ? t('pipeline.replay_running') : t('pipeline.strength_replay_button')}
+        </button>
+      </div>
+      {result && (
+        <div style={{ marginTop: 10 }}>
+          <div style={{ fontSize: 11, color: 'var(--engram-accent-success)', marginBottom: 8 }}>
+            {t('pipeline.strength_replay_done', {
+              nodes: result.nodes_touched,
+              acts: result.activations_replayed,
+              max: result.max_strength.toFixed(2),
+              median: result.median_strength.toFixed(2),
+            })}
+          </div>
+          {Object.keys(result.histogram || {}).length > 0 && (
+            <div>
+              <div style={{ fontSize: 10, color: 'var(--text3)', textTransform: 'uppercase', letterSpacing: '0.05em', marginBottom: 4 }}>
+                {t('pipeline.strength_distribution')}
+              </div>
+              <div style={{ display: 'flex', gap: 4, flexWrap: 'wrap' }}>
+                {Object.entries(result.histogram).map(([bucket, n]) => (
+                  <span key={bucket} style={{
+                    fontSize: 10, padding: '2px 8px', borderRadius: 10,
+                    background: 'var(--surface2)', color: 'var(--text2)',
+                    fontFamily: 'monospace',
+                  }}>{bucket}: {n}</span>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       )}
       {err && (

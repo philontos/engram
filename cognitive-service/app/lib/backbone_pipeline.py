@@ -1132,6 +1132,29 @@ def _write_activations(entry_id: int, confirmed: list[dict], entry_ts: str = "",
 # Node 持久化
 # ---------------------------------------------------------------------------
 
+def effective_strength(stored_strength: float, last_hit_at: str | None, now: datetime | None = None) -> float:
+    """读取时衰减：返回当前等效 strength。
+
+    存储的 strength 是 last_hit_at 时刻的累积值；自那之后没新激活 → 按
+    exp(-λ × days_since_last_hit) 衰减。这样召回排序自然反映"近期热度"。
+
+    存储值不变（落库的是历史快照），仅用于 query / retrieval 时显示和排序。
+    """
+    if not last_hit_at or stored_strength <= 0:
+        return float(stored_strength or 0.0)
+    try:
+        last = datetime.fromisoformat(last_hit_at)
+        if last.tzinfo is None:
+            last = last.replace(tzinfo=timezone.utc)
+    except Exception:
+        return float(stored_strength)
+    ref = now or datetime.now(timezone.utc)
+    if ref.tzinfo is None:
+        ref = ref.replace(tzinfo=timezone.utc)
+    days = max(0, (ref - last).days)
+    return float(stored_strength) * math.exp(-NODE_STRENGTH["lambda"] * days)
+
+
 def _insert_new_node(domain: str, candidate: dict, label_emb: list, new_conf: float, entry_id: int, origin: str, entry_ts: str = "") -> int | None:
     label = (candidate.get("label") or "").strip()
     if not label:
@@ -1158,7 +1181,17 @@ def _insert_new_node(domain: str, candidate: dict, label_emb: list, new_conf: fl
 
 
 def _update_node_strength(node_id: int, new_conf: float, entry_id: int, origin: str, entry_ts: str = "", entry_dt: datetime | None = None) -> tuple[float | None, float, dict | None]:
-    """更新节点 strength + 累加 source_entry_ids（仅内源触达），返回 (old_strength, new_strength, before_state)。"""
+    """更新节点 strength + 累加 source_entry_ids（仅内源触达），返回 (old_strength, new_strength, before_state)。
+
+    DWAS（Decay-Weighted Activation Sum）：
+        strength_new = strength_old × exp(-λ × days_since_last_hit) + new_conf
+
+    每次激活在衰减后的旧值上"累加"一次置信度，自然反映"近期反复出现 = 高 strength"
+    的产品语义。strength 不再被锁死在 [0, 1]，而是反映累积关注度（典型 0-5）。
+    上限可选：NODE_STRENGTH.cap 设为 None 不限，或浮点数硬截断。
+
+    详细推导见 cognitive-service/README.md "节点 Strength 衰减"。
+    """
     with get_conn() as conn:
         row = conn.execute(
             "SELECT strength, hit_count, last_hit_at, source_entry_ids, origin, current_activation_id FROM backbone_nodes WHERE id=?",
@@ -1200,14 +1233,15 @@ def _update_node_strength(node_id: int, new_conf: float, entry_id: int, origin: 
         except Exception:
             pass
 
+    # DWAS 核心公式：先按 days 衰减老 strength，再加上本次激活的 conf
     lam = NODE_STRENGTH["lambda"]
-    time_decay = math.exp(-lam * days)
-    freq_bonus = 1.0 + math.log(1.0 + hit_count)
-    hist_weight = time_decay * freq_bonus
-    hist_effective = hist_weight * old_strength
-    denom = hist_effective + new_conf
-    alpha = new_conf / denom if denom > 0 else 1.0
-    new_strength = (1 - alpha) * old_strength + alpha * new_conf
+    decayed = old_strength * math.exp(-lam * days)
+    new_strength = decayed + float(new_conf)
+
+    # 可选硬上限（防极端积累）；None 不截断
+    cap = NODE_STRENGTH.get("cap")
+    if cap is not None:
+        new_strength = min(new_strength, float(cap))
 
     ts = entry_ts or _ts(None)
     with get_conn() as conn:

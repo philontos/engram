@@ -80,6 +80,13 @@ const dict: Dict = {
     nodes_n:              '{n} nodes',
     edges_n:              '{n} edges',
     none_yet:             '—',
+    strength_replay_title:    'Node strength replay',
+    strength_replay_subtitle: 'Rebuild strength from backbone_activations (DWAS formula), zero LLM calls. Use after changing node strength formula or params.',
+    strength_replay_button:   'Replay node_strength',
+    strength_replay_domain:   'Domain only',
+    strength_replay_domain_all: 'All domains',
+    strength_replay_done:     '✓ Done: {nodes} nodes / {acts} activations replayed / max={max} / median={median}',
+    strength_distribution:    'New distribution',
   },
 
   stats: {

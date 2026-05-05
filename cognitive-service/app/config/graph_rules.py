@@ -14,9 +14,19 @@ NODE_ORIGINS = ["internal", "external"]
 # 边来源：llm = LLM 关系提取；algo = 算法自动建连（相似度等）
 EDGE_SOURCES = ["llm", "algo"]
 
-# 节点 strength 累加算法参数
+# 节点 strength 累加算法参数（DWAS：Decay-Weighted Activation Sum）
+#
+# 写入：strength_new = strength_old × exp(-λ × Δt) + new_conf
+# 读取：effective = stored × exp(-λ × days_since_last_hit)
+#
+# 与 PROFILE_MERGE 的贝叶斯递推不同：strength 不是估计稳态隐变量，而是反映
+# "近期反复出现"的动态关注度。所以不要求收敛，反而需要持续响应新激活。
+#
+# 详细推导见 cognitive-service/README.md "节点 Strength 衰减"。
 NODE_STRENGTH = {
-    "lambda": 0.01,  # 时间衰减系数，半衰期约 69 天
+    "lambda": 0.01,  # 时间衰减系数，半衰期约 69 天（与 EDGE_DECAY 区分；后者更慢）
+    "cap":    None,  # 可选硬上限。None 表示不截断（exp 衰减天然防 runaway）；
+                     # 想限制极端积累可设浮点（如 10.0）
 }
 
 # 边权重增量算法参数（LLM 只输出 confidence，weight 由算法计算）

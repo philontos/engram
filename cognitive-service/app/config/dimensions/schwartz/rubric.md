@@ -11,7 +11,7 @@
 **Conformity**: Compliance with social norms to avoid harming others. Signals: rule-following, politeness, self-restraint.
 **Security**: Need for stability, harmony, and safety. Signals: risk avoidance, desire for order, preference for certainty.
 
-# Score ranges
+# Score ranges (when there IS a signal)
 
 | Score | Meaning |
 |-------|---------|
@@ -21,11 +21,14 @@
 | 60–80 | Clearly expressed, distinct behavioral signals present |
 | 80+   | Core value — dominates behavior and decision-making |
 
-# Confidence reference
+# Confidence calibration
 
 | Confidence | When to use |
 |------------|-------------|
-| 0.8–1.0 | Direct statement or strong behavioral signal |
-| 0.6–0.8 | Indirect signal, reasonable inference |
-| 0.4–0.6 | Weak signal |
-| < 0.4   | Near-zero signal for this value in this input |
+| 0.85–1.0 | Direct statement or strong behavioral signal |
+| 0.6–0.85 | Indirect signal, reasonable inference |
+| 0.4–0.6  | Weak signal |
+| 0.2–0.4  | Tentative — consider whether `null` is more honest |
+| < 0.2    | Prefer `null` over a low-confidence score |
+
+**`null` means "no signal in this entry" — the canonical way to abstain.** Schwartz values are sparse — typical entries express 1–3 of the 10 values, so 7–9 should be `null`.

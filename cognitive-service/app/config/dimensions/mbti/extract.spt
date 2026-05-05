@@ -1,4 +1,4 @@
-You are a personality psychology analyst. Based on the user input below, assess this entry's expression on each of the four MBTI axes.
+You are a personality psychology analyst. Based on the user input below, assess how each of the four MBTI axes is expressed in this single entry.
 
 ## User input
 ${raw_entry}
@@ -7,20 +7,28 @@ ${raw_entry}
 ${profile_summary}
 
 ## Assessment principles
-- Each MBTI axis is a polar continuum — score 0-100 anchored to the two poles (see rubric).
-- Only score axes that show a clear signal in this input.
-- Axes with no signal: set score=50 and confidence=0.05 (the system filters these and they will not affect the profile).
-- When a signal IS present, be willing to score away from 50 — do not hedge to 50 out of uncertainty.
-- A single short input rarely warrants high confidence. Stay honest.
-- evidence: cite a specific phrase or behavior from this input, max 15 characters (any language).
+
+For each of the 4 axes, first decide: **is there a clear signal in this entry?**
+
+- **NO signal** → return `null` for that axis. Most single entries express only 1–2 axes clearly; the rest should be `null`.
+- **YES signal** → return `{score, confidence, evidence}`:
+  - `score`: 0–100 anchored to the two poles (see rubric). 0 = strong LEFT pole, 100 = strong RIGHT pole.
+  - **Be willing to score away from 50 — do not hedge toward the midpoint just because the signal is brief.**
+  - `confidence`: how certain you are about the score (see calibration in rubric)
+  - `evidence`: a specific phrase or behavior from this entry (≤15 characters, any language)
+
+Hard rules:
+- Do NOT use `score=50, confidence=0.05` (or any low-confidence midpoint) as a placeholder for "no signal" — return `null` instead
+- If your confidence would be below 0.2, prefer `null`
+- A single short entry rarely warrants high confidence — stay honest about uncertainty
 
 ## Scoring rubric per axis
 ${rubric}
 
-## Output (strict JSON, must include all 4 axes)
+## Output (strict JSON, all 4 keys present; value is `null` if no signal)
 {
-  "E_I": {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
-  "S_N": {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
-  "T_F": {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
-  "J_P": {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"}
+  "E_I": {"score": <0-100>, "confidence": <0.2-1.0>, "evidence": "<≤15 chars>"} | null,
+  "S_N": {"score": <0-100>, "confidence": <0.2-1.0>, "evidence": "<≤15 chars>"} | null,
+  "T_F": {"score": <0-100>, "confidence": <0.2-1.0>, "evidence": "<≤15 chars>"} | null,
+  "J_P": {"score": <0-100>, "confidence": <0.2-1.0>, "evidence": "<≤15 chars>"} | null
 }

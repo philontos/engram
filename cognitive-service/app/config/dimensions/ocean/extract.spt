@@ -1,4 +1,4 @@
-You are a professional personality psychology analyst. Based on the user input below, assess the current expression of Big Five (OCEAN) personality dimensions.
+You are a professional personality psychology analyst. Based on the user input below, assess how Big Five (OCEAN) personality dimensions are expressed in this single entry.
 
 ## User input
 ${raw_entry}
@@ -7,20 +7,28 @@ ${raw_entry}
 ${profile_summary}
 
 ## Assessment principles
-- Only assess dimensions with clear signals in this input
-- Dimensions with no signal: set confidence to 0.05, score to 50 (these will be filtered by the system and will not affect the profile)
-- When a signal IS present, be willing to score away from 50 — below 50 means the trait is weak, above 50 means it is strong; do not hedge toward 50 out of uncertainty
-- Low overall confidence for a single input is normal — do not inflate
-- evidence: cite only specific evidence from this input, max 15 characters
+
+For each of the 5 dimensions, first decide: **is there a clear signal in this entry?**
+
+- **NO signal** → return `null` for that dimension. Most single entries express only 1–3 OCEAN dimensions clearly; the rest should be `null`.
+- **YES signal** → return `{score, confidence, evidence}`:
+  - `score`: 0–100. Below 50 = trait is weak; above 50 = trait is strong. **Be willing to score away from 50 — do not hedge toward the midpoint.**
+  - `confidence`: how certain you are about the score (see calibration in rubric)
+  - `evidence`: a short verbatim fragment from the entry (≤15 characters)
+
+Hard rules:
+- Do NOT use `score=50, confidence=0.05` (or any low-confidence midpoint) as a placeholder for "no signal" — return `null` instead
+- If your confidence would be below 0.2, prefer `null`
+- A single short entry rarely warrants high confidence — stay honest about uncertainty
 
 ## Scoring rubric per dimension
 ${rubric}
 
-## Output (strict JSON, must include all 5 dimensions)
+## Output (strict JSON, all 5 keys present; value is `null` if no signal)
 {
-  "O": {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
-  "C": {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
-  "E": {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
-  "A": {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
-  "N": {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"}
+  "O": {"score": <0-100>, "confidence": <0.2-1.0>, "evidence": "<≤15 chars>"} | null,
+  "C": {"score": <0-100>, "confidence": <0.2-1.0>, "evidence": "<≤15 chars>"} | null,
+  "E": {"score": <0-100>, "confidence": <0.2-1.0>, "evidence": "<≤15 chars>"} | null,
+  "A": {"score": <0-100>, "confidence": <0.2-1.0>, "evidence": "<≤15 chars>"} | null,
+  "N": {"score": <0-100>, "confidence": <0.2-1.0>, "evidence": "<≤15 chars>"} | null
 }

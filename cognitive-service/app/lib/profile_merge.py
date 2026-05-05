@@ -17,6 +17,11 @@
 存储格式（profile_dimensions.content_json 的子维度对象）：
     {"score": μ, "tau": τ, "confidence": τ/(τ+τ_ref), "evidence": "...", ...}
 
+无信号处理（按优先级）：
+1. LLM 显式 `null`：保留旧画像，不更新（首选语义）
+2. min_conf 兜底：confidence < 0.15 的"低置信占位"也保留旧画像
+   （防 LLM 不守 null 约定，仍输出 score=50, conf=0.05 形式）
+
 facts / key_value 等无 score 字段的子维度走覆盖逻辑（直接取新值）。
 
 详细推导、参数物理含义、收敛仿真见 cognitive-service/README.md "Profile Merge"。
@@ -86,24 +91,24 @@ def merge_dimension(dimension: str, new_content: dict, entry_id: int | None = No
         new_val = new_content.get(key)
         old_val = old_content.get(key)
 
-        # 非评分字段（无 score 字段）：facts 等 key_value 维度走覆盖逻辑
-        if not isinstance(new_val, dict) or "score" not in (new_val or {}):
-            chosen = new_val if new_val is not None else old_val
-            if (
-                isinstance(chosen, dict)
-                and "evidence" in chosen
-                and entry_id is not None
-                and chosen is new_val
-            ):
+        # 优先级 1：LLM 显式 null = 该子维度无信号，保留旧画像
+        if new_val is None:
+            if old_val is not None:
+                merged[key] = old_val
+            continue
+
+        # 非评分字段（facts 等 key_value 形态，无 score 字段）：直接覆盖
+        if not isinstance(new_val, dict) or "score" not in new_val:
+            chosen = new_val
+            if isinstance(chosen, dict) and "evidence" in chosen and entry_id is not None:
                 chosen = {**chosen, "source_entry_id": entry_id}
-            if chosen is not None:
-                merged[key] = chosen
+            merged[key] = chosen
             continue
 
         new_score = float(new_val.get("score", score_prior))
         new_conf = float(new_val.get("confidence", 0.5))
 
-        # 无信号过滤：保留旧画像，不让低质量信号污染累积精度
+        # 优先级 2：min_conf 兜底过滤（防 LLM 不守 null 约定，仍输出低置信占位）
         if new_conf < min_conf:
             if old_val is not None:
                 merged[key] = old_val

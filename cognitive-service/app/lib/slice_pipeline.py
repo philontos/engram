@@ -120,8 +120,88 @@ async def _extract_dimension(dim: dict, raw: str, profile_summary: str) -> dict 
         return None
 
 
-async def generate_slice(entry_id: int, raw: str) -> int | None:
-    """生成并持久化一条 entry 的完整切片。返回 slice_id，失败返回 None。"""
+def _normalize_extraction(dim_cfg: dict, content: dict) -> dict:
+    """对 LLM 抽取结果做 schema 兜底归一化。
+
+    新 prompt 约定：每个子维度要么是 {score, confidence, evidence}，要么是 None。
+    LLM 偶尔不守约定时（缺字段、错类型、`{"abstain": true}` 之类），统一兜底为 None。
+    facts 等非评分维度（无 score 字段）保留原值。
+    """
+    if not isinstance(content, dict):
+        return {}
+
+    sub_dims = dim_cfg.get("sub_dimensions") or []
+    summary_format = dim_cfg.get("summary_format", "free")
+
+    if summary_format != "scores" or not sub_dims:
+        # 非 score 形态（facts / situation 等）→ 不动
+        return content
+
+    out: dict = {}
+    for sd in sub_dims:
+        key = sd.get("key")
+        if not key:
+            continue
+        v = content.get(key)
+        if v is None:
+            out[key] = None
+        elif isinstance(v, dict) and "score" in v and "confidence" in v:
+            out[key] = v
+        else:
+            # 异常 schema（缺字段 / 非字典 / {"abstain":true} 等）→ 兜底为 None
+            out[key] = None
+    return out
+
+
+def _extraction_health(dim_cfg: dict, content: dict) -> dict:
+    """统计单次抽取的健康指标，供观测用。
+
+    返回三个计数：
+    - null_count        : LLM 显式返回 None 的子维度数（新 prompt 期望的形态）
+    - low_conf_count    : confidence < 0.15 的占位（旧 prompt 行为，应该接近 0）
+    - midpoint_hedge_count: score 在 [45,55] 且 conf ∈ [0.15, 0.5) 的中点 hedge
+                           （anchoring 残留，越低越好）
+    + total: 子维度总数（分母）
+    """
+    sub_dims = dim_cfg.get("sub_dimensions") or []
+    if dim_cfg.get("summary_format") != "scores" or not sub_dims:
+        return {}
+
+    null_count = 0
+    low_conf_count = 0
+    hedge_count = 0
+    total = 0
+    for sd in sub_dims:
+        key = sd.get("key")
+        if not key:
+            continue
+        total += 1
+        v = content.get(key)
+        if v is None:
+            null_count += 1
+            continue
+        if not isinstance(v, dict):
+            continue
+        c = float(v.get("confidence", 0))
+        s = float(v.get("score", 50))
+        if c < 0.15:
+            low_conf_count += 1
+        elif c < 0.5 and 45 <= s <= 55:
+            hedge_count += 1
+    return {
+        "total": total,
+        "null_count": null_count,
+        "low_conf_count": low_conf_count,
+        "midpoint_hedge_count": hedge_count,
+    }
+
+
+async def generate_slice(entry_id: int, raw: str, trace: dict | None = None) -> int | None:
+    """生成并持久化一条 entry 的完整切片。返回 slice_id，失败返回 None。
+
+    trace（可选）：传入则在 trace["slice_extraction_health"] 写入每维度的
+    null/low_conf/midpoint_hedge 计数，供后续观测和 prompt 调优。
+    """
     if not is_structured_llm_configured():
         return None
 
@@ -180,20 +260,30 @@ async def generate_slice(entry_id: int, raw: str) -> int | None:
 
     # 提取人格维度，先收集结果再决定是否 merge
     extracted: dict[str, tuple[dict, dict]] = {}  # key -> (dim_cfg, content)
+    health: dict[str, dict] = {}  # key -> {null_count, low_conf_count, midpoint_hedge_count}
     for dim in DIMENSIONS:
         if dim["key"] == "situation":
             continue  # situation 已单独处理
         if not dim.get("enabled", True):
             continue
-        content = await _extract_dimension(dim, enriched_raw, profile_summary)
-        if not content:
+        raw_content = await _extract_dimension(dim, enriched_raw, profile_summary)
+        if not raw_content:
             continue
+        # schema 兜底：异常子维度（缺字段 / 错类型）统一归一化为 None
+        content = _normalize_extraction(dim, raw_content)
+        # 观测埋点：记录每维度的 null / low_conf / midpoint_hedge 计数
+        h = _extraction_health(dim, content)
+        if h:
+            health[dim["key"]] = h
         with get_conn() as conn:
             conn.execute(
                 "INSERT INTO slice_features (slice_id, dimension, content_json, created_at) VALUES (?, ?, ?, CURRENT_TIMESTAMP)",
                 (slice_id, dim["key"], json.dumps(content, ensure_ascii=False)),
             )
         extracted[dim["key"]] = (dim, content)
+
+    if trace is not None and health:
+        trace["slice_extraction_health"] = health
 
     for key, (dim, content) in extracted.items():
         if skip_profile_merge:

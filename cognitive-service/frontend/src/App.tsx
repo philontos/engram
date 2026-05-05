@@ -80,7 +80,14 @@ export default function App() {
     setAdminBusy(true); setAdminMsg('')
     try {
       await resetData(scope); setAdminMsg(t('admin.reset_success'))
+      // Global invalidate covers most queries; explicitly hit pipeline keys too
+      // so Health metrics / Trace switch to "empty" state right away even if
+      // the user is currently looking at the Pipeline tab.
       await qc.invalidateQueries()
+      await qc.invalidateQueries({ queryKey: ['pipeline-entries'] })
+      await qc.invalidateQueries({ queryKey: ['pipeline-health'] })
+      await qc.invalidateQueries({ queryKey: ['pipeline-trace'] })
+      await qc.invalidateQueries({ queryKey: ['pipeline-entry-detail'] })
     } catch (e) { setAdminMsg(`${t('common.failed')} ${String(e)}`) }
     finally { setAdminBusy(false) }
   }

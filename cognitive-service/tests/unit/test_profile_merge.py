@@ -9,8 +9,8 @@
 测试覆盖三层：
 1. 纯公式：_bayes_update 在已知输入下的数值正确性
 2. 收敛性质：稳态精度上限、α 衰减、对漂移的响应
-3. 端到端：merge_dimension 通过 DB 一整轮，覆盖首次写入 / 老数据兼容 /
-   facts key_value / 低 conf 过滤等分支
+3. 端到端：merge_dimension 通过 DB 一整轮，覆盖首次写入 / null 信号 /
+   facts key_value / min_conf 兜底等分支
 """
 
 import json
@@ -125,7 +125,7 @@ class TestConfidenceDisplay:
 class TestMergeDimensionEndToEnd:
     def test_first_write_uses_prior(self, db):
         # 首次写入，先验起步
-        merge_dimension("ocean", {"O": {"score": 80, "confidence": 0.9, "evidence": "好奇心强"}})
+        merge_dimension("ocean", {"O": {"score": 80, "confidence": 0.9, "evidence": "loves new ideas"}})
 
         with get_conn() as conn:
             row = conn.execute("SELECT content_json, sample_count FROM profile_dimensions").fetchone()
@@ -136,22 +136,43 @@ class TestMergeDimensionEndToEnd:
         assert content["O"]["score"] == pytest.approx(63.55, abs=0.5)
         assert "tau" in content["O"]
         assert "confidence" in content["O"]
-        assert content["O"]["evidence"] == "好奇心强"
+        assert content["O"]["evidence"] == "loves new ideas"
         assert row["sample_count"] == 1
 
-    def test_low_confidence_filtered(self, db):
-        # 第一条 conf=0.05 应被过滤，profile_dimensions 行存在但子键为空
-        merge_dimension("ocean", {"O": {"score": 50, "confidence": 0.05}})
+    def test_null_subdim_first_write_skipped(self, db):
+        # LLM 返回 None 的子维度在首次写入时直接跳过
+        merge_dimension("ocean", {"O": None})
         with get_conn() as conn:
             row = conn.execute("SELECT content_json FROM profile_dimensions").fetchone()
         assert row is not None
         content = json.loads(row["content_json"])
-        assert "O" not in content  # 被过滤
+        assert "O" not in content  # null 不写入
+
+    def test_null_subdim_preserves_old_value(self, db):
+        # 老画像有 O，新观测对 O 显式 null → 保留老画像不变
+        merge_dimension("ocean", {"O": {"score": 80, "confidence": 0.9, "evidence": "x"}})
+        with get_conn() as conn:
+            old = json.loads(conn.execute("SELECT content_json FROM profile_dimensions").fetchone()["content_json"])
+
+        merge_dimension("ocean", {"O": None})
+        with get_conn() as conn:
+            new = json.loads(conn.execute("SELECT content_json FROM profile_dimensions").fetchone()["content_json"])
+        # O 子维度应当原样保留（同 score / 同 tau）
+        assert new["O"]["score"] == old["O"]["score"]
+        assert new["O"]["tau"] == old["O"]["tau"]
+
+    def test_min_conf_safety_net(self, db):
+        # LLM 不守 null 约定，仍输出 (score=50, conf=0.05) → 被 min_conf 兜底过滤
+        merge_dimension("ocean", {"O": {"score": 50, "confidence": 0.05}})
+        with get_conn() as conn:
+            row = conn.execute("SELECT content_json FROM profile_dimensions").fetchone()
+        content = json.loads(row["content_json"])
+        assert "O" not in content  # 被 min_conf 过滤
 
     def test_multiple_entries_converge(self, db):
         # 喂 200 条 (x=70, c=0.6)，最终 score 应在 70 附近
         for _ in range(200):
-            merge_dimension("ocean", {"E": {"score": 70, "confidence": 0.6, "evidence": "x"}})
+            merge_dimension("ocean", {"E": {"score": 70, "confidence": 0.6, "evidence": "social"}})
 
         with get_conn() as conn:
             row = conn.execute("SELECT content_json, sample_count FROM profile_dimensions").fetchone()
@@ -161,8 +182,8 @@ class TestMergeDimensionEndToEnd:
 
     def test_facts_key_value_overwrite_unchanged(self, db):
         # facts 维度（无 score 字段）走旧覆盖逻辑，不受贝叶斯影响
-        merge_dimension("facts", {"occupation": {"value": "engineer", "evidence": "干工程"}}, entry_id=1)
-        merge_dimension("facts", {"occupation": {"value": "designer", "evidence": "做设计"}}, entry_id=2)
+        merge_dimension("facts", {"occupation": {"value": "engineer", "evidence": "engineering work"}}, entry_id=1)
+        merge_dimension("facts", {"occupation": {"value": "designer", "evidence": "design work"}}, entry_id=2)
 
         with get_conn() as conn:
             row = conn.execute("SELECT content_json FROM profile_dimensions WHERE dimension='facts'").fetchone()

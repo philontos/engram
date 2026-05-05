@@ -250,7 +250,7 @@ async def _run_pipeline(entry_id: int, row) -> ProcessResult:
             # Step 1: 切片生成 + 画像融合
             _emit("slice", "start")
             profile_before = _snapshot_profile()
-            slice_id = await generate_slice(entry_id, raw)
+            slice_id = await generate_slice(entry_id, raw, trace=trace)
             profile_after = _snapshot_profile()
 
             if slice_id:

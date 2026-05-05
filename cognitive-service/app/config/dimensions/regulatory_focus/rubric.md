@@ -4,7 +4,7 @@
 
 **Prevention Focus**: Avoidance motivation away from losses and obligations. Signals: vigilance language ("I need to avoid/protect/not lose"), obligation framing ("I should/must/can't afford to"), focus on safety and stability, duty-driven reasoning, loss aversion.
 
-# Score ranges
+# Score ranges (when there IS a signal)
 
 | Score | Meaning |
 |-------|---------|
@@ -14,13 +14,14 @@
 | 70–85 | Clear signals present |
 | 85+   | Dominant — requires strong explicit evidence |
 
-# Confidence reference
+# Confidence calibration
 
 | Confidence | When to use |
 |------------|-------------|
-| 0.8–1.0 | Direct statement or unambiguous behavioral signal |
-| 0.6–0.8 | Indirect signal, reasonable inference |
-| 0.4–0.6 | Weak signal, only vague hints |
-| < 0.4   | Near-zero signal in this input |
+| 0.85–1.0 | Direct statement or unambiguous behavioral signal |
+| 0.6–0.85 | Indirect signal, reasonable inference |
+| 0.4–0.6  | Weak signal, only vague hints |
+| 0.2–0.4  | Tentative — consider whether `null` is more honest |
+| < 0.2    | Prefer `null` over a low-confidence score |
 
-Note: Both dimensions are independent — a person can be high on both or low on both.
+**`null` means "no signal in this entry" — the canonical way to abstain.** Both dimensions are independent — both can be `null`, both can have signals, or only one.

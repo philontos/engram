@@ -10,13 +10,22 @@ ${raw_entry}
 ${rubric}
 
 ## Rules
-- Score range: 0–100 (50 = neutral / unknown)
-- confidence: 0.0–1.0 based on strength of evidence in the entry
-- If this entry contains no signal for a sub-dimension, return score=50 and confidence=0.1
-- Do NOT infer beyond what the entry explicitly supports
 
-## Output (strict JSON, all keys required)
+For each sub-dimension, first decide: **is there a clear signal in this entry?**
+
+- **NO signal** → return `null` for that sub-dimension. Do not invent a score. "No signal" is the default — most entries express only a few sub-dimensions clearly.
+- **YES signal** → return `{score, confidence, evidence}`:
+  - `score`: 0–100. Be willing to score away from 50 — do not hedge toward the midpoint just to look balanced.
+  - `confidence`: how certain you are about the score (see calibration in rubric)
+  - `evidence`: a short verbatim fragment from the entry (≤15 chars), or a brief paraphrase if the signal is behavioral rather than verbal
+
+Hard rules:
+- Do NOT infer beyond what the entry explicitly supports
+- Do NOT use score=50 as a placeholder — if you would be hedging at the midpoint with low confidence, return `null` instead
+- If confidence would be below 0.2, prefer `null`
+
+## Output (strict JSON, all sub-dimension keys present; value is `null` if no signal)
 {
-  "sub_key_a": {"score": <0-100>, "confidence": <0.0-1.0>, "evidence": "<brief quote or null>"},
-  "sub_key_b": {"score": <0-100>, "confidence": <0.0-1.0>, "evidence": "<brief quote or null>"}
+  "sub_key_a": {"score": <0-100>, "confidence": <0.2-1.0>, "evidence": "<≤15 chars>"} | null,
+  "sub_key_b": {"score": <0-100>, "confidence": <0.2-1.0>, "evidence": "<≤15 chars>"} | null
 }

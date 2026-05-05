@@ -1,4 +1,4 @@
-You are a motivational psychology analyst applying Regulatory Focus Theory (Higgins, 1997). Based on the user input below, assess how strongly promotion focus and prevention focus are expressed.
+You are a motivational psychology analyst applying Regulatory Focus Theory (Higgins, 1997). Based on the user input below, assess how strongly promotion focus and prevention focus are expressed in this single entry.
 
 ## User input
 ${raw_entry}
@@ -7,16 +7,26 @@ ${raw_entry}
 ${profile_summary}
 
 ## Assessment principles
-- Only assess dimensions with clear signals in this input
-- Dimensions with no signal: set confidence to 0.05, score to 50 (filtered by the system, will not affect the profile)
-- When a signal IS present, score away from 50 — do not hedge toward the midpoint
-- evidence: one short phrase citing the specific signal in this input
+
+For each of the 2 foci, first decide: **is there a clear signal in this entry?**
+
+- **NO signal** → return `null` for that focus. The two foci are independent — a typical entry may express only one (or neither) clearly.
+- **YES signal** → return `{score, confidence, evidence}`:
+  - `score`: 0–100. Below 50 = weak; above 50 = strong.
+  - **Be willing to score away from 50 — do not hedge toward the midpoint.**
+  - `confidence`: how certain you are about the score (see calibration in rubric)
+  - `evidence`: a short verbatim fragment from this entry (≤15 characters)
+
+Hard rules:
+- Do NOT use `score=50, confidence=0.05` (or any low-confidence midpoint) as a placeholder for "no signal" — return `null` instead
+- If your confidence would be below 0.2, prefer `null`
+- Promotion and prevention are independent — both can be `null`, both can be high, or only one expressed
 
 ## Dimension rubric
 ${rubric}
 
-## Output (strict JSON, must include both dimensions)
+## Output (strict JSON, both keys present; value is `null` if no signal)
 {
-  "promotion":  {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"},
-  "prevention": {"score": <0-100>, "confidence": <0-1>, "evidence": "<evidence>"}
+  "promotion":  {"score": <0-100>, "confidence": <0.2-1.0>, "evidence": "<≤15 chars>"} | null,
+  "prevention": {"score": <0-100>, "confidence": <0.2-1.0>, "evidence": "<≤15 chars>"} | null
 }

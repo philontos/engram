@@ -16,11 +16,14 @@
 | 70–85 | Clearly elevated, concrete signal present |
 | 85+   | Extreme — requires very strong evidence |
 
-## Confidence reference
+## Confidence calibration (when there IS a signal)
 
 | Confidence | When to use |
 |------------|-------------|
-| 0.8–1.0 | Direct, explicit statement in entry |
-| 0.6–0.8 | Indirect but clear inference |
-| 0.4–0.6 | Weak or ambiguous signal |
-| < 0.4   | Almost no signal — score stays near 50 |
+| 0.85–1.0 | Direct, explicit self-report or unambiguous behavioural description |
+| 0.6–0.85 | Clear behavioural signal, reasonable inference |
+| 0.4–0.6  | Indirect signal, real but weak |
+| 0.2–0.4  | Tentative — consider whether `null` is more honest |
+| < 0.2    | Prefer `null` over a low-confidence score |
+
+**`null` means "no signal in this entry" — the canonical way to abstain.** Do not output `score=50, confidence=0.05` as a placeholder; the new schema expects `null` for that case.

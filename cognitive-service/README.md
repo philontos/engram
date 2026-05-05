@@ -102,9 +102,18 @@ new_strength = (1 - alpha) × old_strength + alpha × new_conf
 | **0.98** | **34** | **50** | **默认。允许慢漂移，与"画像每年变 ~5 分"对齐** |
 | 0.95 | 14 | 20 | 响应快、稳态更抖；适合"频繁变化的状态量" |
 
+#### 无信号语义（null vs low-confidence）
+
+`extract.spt` 约定 LLM 对**无信号**的子维度返回 `null`，而不是用 `score=50, confidence=0.05` 这种"低置信占位"。融合层按优先级处理：
+
+1. **`null`（首选）**：LLM 显式 abstain → 保留旧画像，不更新
+2. **`min_conf` 兜底**：confidence < 0.15 的占位 → 同样保留旧画像（防 LLM 不守约定）
+
+`slice_pipeline._normalize_extraction` 会把异常 schema（缺字段 / 错类型 / `{"abstain": true}` 之类）统一兜底为 `null`，避免污染贝叶斯递推。
+
 #### Anchoring bias 的边界
 
-LLM 抽取在弱信号时会向 score=50 锚定（提示词限制下不可避免），导致 μ_∞ 收敛到 θ + bias 而非真实 θ。`τ_obs = c²` 的二阶精度加权会**自然压制弱信号 hedged 观测的影响**，但无法完全消除偏差。彻底修复需要 prompt 端改造（独立工作项），融合层不负责。
+LLM 抽取在弱信号时仍可能向 score=50 锚定（即使 prompt 要求返回 null）。`τ_obs = c²` 的二阶精度加权会**自然压制弱信号 hedged 观测的影响**，但无法完全消除偏差。`slice_pipeline._extraction_health` 把每条 entry 的 `null_count / low_conf_count / midpoint_hedge_count` 写入 trace，供观测和后续 prompt 调优。
 
 #### 为什么不是简单移动平均
 

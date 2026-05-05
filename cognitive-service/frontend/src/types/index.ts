@@ -21,7 +21,7 @@ export interface DimensionSchema {
 export interface Entry {
   id: number
   preview: string
-  processing_status: 'captured' | 'processed' | 'slice_failed' | 'reverted'
+  processing_status: 'captured' | 'processing' | 'processed' | 'slice_failed' | 'failed' | 'reverted'
   created_at: string
   slice_id: number | null
   domains: string[]

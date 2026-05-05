@@ -10,7 +10,7 @@ import { useBackbones } from '@/lib/useBackbones'
 import { useI18n } from '@/i18n'
 import type { DimensionSchema } from '@/types'
 import { fmtTime } from '@/lib/utils'
-import { RefreshCw, Search, Trash2, ChevronRight, RotateCcw } from 'lucide-react'
+import { RefreshCw, Search, Trash2, ChevronRight, RotateCcw, Play } from 'lucide-react'
 import { useConfirm } from '@/components/ui/ConfirmDialog'
 
 type ProcessEvent = {
@@ -231,6 +231,21 @@ export function EntriesTab() {
                       })}
                     </div>
                     <div style={{ display: 'flex', gap: 6, marginTop: 8 }} onClick={ev => ev.stopPropagation()}>
+                      {/* Process: show when entry needs (re)processing — captured / failed / reverted.
+                          Hidden during 'processing' (pulsing badge already shows progress).
+                          Hidden when 'processed' (no need; Trace button shows instead). */}
+                      {(e.processing_status === 'captured'
+                        || e.processing_status === 'slice_failed'
+                        || e.processing_status === 'failed'
+                        || e.processing_status === 'reverted') && (
+                        <button onClick={ev => { ev.stopPropagation(); startProcessStream(e.id) }}
+                          disabled={processEntryId === e.id && !processDone}
+                          title={t('entries.process')}
+                          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 6, border: '1px solid var(--engram-accent-primary)', cursor: 'pointer', background: 'var(--engram-tint-primary)', color: 'var(--engram-accent-primary)', fontSize: 11, opacity: (processEntryId === e.id && !processDone) ? 0.5 : 1 }}>
+                          <Play size={11} />
+                          {processEntryId === e.id && !processDone ? t('entries.processing') : t('entries.process')}
+                        </button>
+                      )}
                       {e.processing_status === 'processed' && (
                         <button onClick={ev => { ev.stopPropagation(); setTraceId(e.id) }}
                           style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 6, border: '1px solid var(--engram-accent-primary)', cursor: 'pointer', background: 'var(--engram-tint-primary)', color: 'var(--accent2)', fontSize: 11 }}>

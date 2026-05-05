@@ -19,7 +19,9 @@ export function PipelineTab() {
 
   const { data: entries = [] } = useQuery({
     queryKey: ['pipeline-entries'],
-    queryFn:  () => fetchPipelineEntries(50),
+    // 200 to match the Reflections tab's fetchEntries(200) — otherwise the
+    // two tabs show different sets when the user has > 50 entries.
+    queryFn:  () => fetchPipelineEntries(200),
   })
   const { data: health, refetch: refetchHealth } = useQuery({
     queryKey: ['pipeline-health'],

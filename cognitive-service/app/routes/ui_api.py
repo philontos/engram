@@ -1004,6 +1004,7 @@ def pipeline_health(limit: int = 100):
 class ReplayRequest(BaseModel):
     dimension: str | None = None
     limit:     int | None = None
+    dry_run:   bool = False  # if True, restore tables after replay (preview mode)
 
 
 @router.post("/admin/replay/profile-merge")
@@ -1012,19 +1013,22 @@ def admin_replay_profile_merge(req: ReplayRequest):
 
     用于：改了融合公式或 PROFILE_MERGE 配置后，想在已有数据上看新曲线。
     可选 dimension（只重算某维度）和 limit（只重算前 N 条 entry）。
+    dry_run=True 时不写库（preview 模式），用于 UI 上的 "Preview" 按钮。
     """
     from scripts.replay_profile_merge import replay
-    stats = replay(dimension=req.dimension, limit=req.limit)
+    stats = replay(dimension=req.dimension, limit=req.limit, dry_run=req.dry_run)
     return {
         "entries_processed":       stats.entries_processed,
         "slice_features_replayed": stats.slice_features_replayed,
         "dimensions_touched":      stats.dimensions_touched,
         "snapshots_written":       stats.snapshots_written,
+        "dry_run":                 req.dry_run,
     }
 
 
 class ReplayNodeStrengthRequest(BaseModel):
-    domain: str | None = None
+    domain:  str | None = None
+    dry_run: bool = False  # if True, compute stats in-memory without persisting (preview mode)
 
 
 @router.post("/admin/replay/node-strength")
@@ -1033,13 +1037,15 @@ def admin_replay_node_strength(req: ReplayNodeStrengthRequest):
 
     用于：改了 _update_node_strength 公式或 NODE_STRENGTH 配置后，想在已有数据上
     看新分布。返回值含直方图，可直接用来校准下游 strength 阈值。
+    dry_run=True 时不写库（preview 模式），histogram 仍正常返回。
     """
     from scripts.replay_node_strength import replay
-    stats = replay(domain=req.domain)
+    stats = replay(domain=req.domain, dry_run=req.dry_run)
     return {
         "nodes_touched":        stats.nodes_touched,
         "activations_replayed": stats.activations_replayed,
         "max_strength":         stats.max_strength,
         "median_strength":      stats.median_strength,
         "histogram":            stats.hist_buckets,
+        "dry_run":              req.dry_run,
     }

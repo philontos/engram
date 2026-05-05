@@ -85,8 +85,17 @@ const dict: Dict = {
     strength_replay_button:   'Replay node_strength',
     strength_replay_domain:   'Domain only',
     strength_replay_domain_all: 'All domains',
-    strength_replay_done:     '✓ Done: {nodes} nodes / {acts} activations replayed / max={max} / median={median}',
+    strength_replay_done:     'Done: {nodes} nodes / {acts} activations replayed / max={max} / median={median}',
     strength_distribution:    'New distribution',
+    // PR #8: trace drill-down + tools section
+    trace_title:              'Processing trace',
+    trace_no_entry_selected:  'Pick an entry on the left',
+    tools_title:              'Tools',
+    tools_subtitle:           'Algorithm tuning utilities: instantly preview new curves after changing PROFILE_MERGE / NODE_STRENGTH params (no LLM cost). Preview = no DB write. Apply = persist.',
+    tools_show:               'Expand',
+    tools_hide:               'Collapse',
+    replay_preview_button:    'Preview',
+    replay_apply_button:      'Apply',
   },
 
   stats: {

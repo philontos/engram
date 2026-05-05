@@ -64,12 +64,15 @@ def _histogram(values: list[float]) -> dict:
     return buckets
 
 
-def replay(domain: str | None = None) -> ReplayStats:
+def replay(domain: str | None = None, dry_run: bool = False) -> ReplayStats:
     """Wipe strength + hit_count + last_hit_at on (optionally domain-scoped) nodes,
     then replay all activations in chronological order under the current formula.
 
     Args:
         domain: if set, only replay nodes within this domain.
+        dry_run: if True, compute the would-be result purely in-memory and DO NOT
+                 wipe or write back to backbone_nodes. Stats / histogram still
+                 returned, so UI can preview without committing.
 
     Returns: stats summary.
     """
@@ -91,13 +94,14 @@ def replay(domain: str | None = None) -> ReplayStats:
 
     placeholders = ",".join(["?"] * len(node_ids))
 
-    # 2. Reset strength / hit_count / last_hit_at on those nodes
-    with get_conn() as conn:
-        conn.execute(
-            f"UPDATE backbone_nodes SET strength = 0.0, hit_count = 0, last_hit_at = NULL "
-            f"WHERE id IN ({placeholders})",
-            node_ids,
-        )
+    # 2. Reset strength / hit_count / last_hit_at on those nodes (skip in dry_run)
+    if not dry_run:
+        with get_conn() as conn:
+            conn.execute(
+                f"UPDATE backbone_nodes SET strength = 0.0, hit_count = 0, last_hit_at = NULL "
+                f"WHERE id IN ({placeholders})",
+                node_ids,
+            )
 
     # 3. Pull all activations for these nodes in chronological order
     with get_conn() as conn:
@@ -132,16 +136,17 @@ def replay(domain: str | None = None) -> ReplayStats:
         st["last_dt"] = dt
         n_acts += 1
 
-    # 5. Persist back
-    with get_conn() as conn:
-        for nid, st in state.items():
-            if st["hits"] == 0:
-                continue
-            last_str = st["last_dt"].isoformat() if st["last_dt"] else None
-            conn.execute(
-                "UPDATE backbone_nodes SET strength = ?, hit_count = ?, last_hit_at = ? WHERE id = ?",
-                (round(st["strength"], 4), st["hits"], last_str, nid),
-            )
+    # 5. Persist back (skip in dry_run — caller just wants to see the would-be stats)
+    if not dry_run:
+        with get_conn() as conn:
+            for nid, st in state.items():
+                if st["hits"] == 0:
+                    continue
+                last_str = st["last_dt"].isoformat() if st["last_dt"] else None
+                conn.execute(
+                    "UPDATE backbone_nodes SET strength = ?, hit_count = ?, last_hit_at = ? WHERE id = ?",
+                    (round(st["strength"], 4), st["hits"], last_str, nid),
+                )
 
     # 6. Build distribution stats from updated rows
     final_strengths = sorted([st["strength"] for st in state.values() if st["hits"] > 0])
@@ -165,9 +170,10 @@ def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.strip().splitlines()[0] if __doc__ else "")
     ap.add_argument("--domain", help="Only replay nodes in this domain (e.g. psychology)")
     ap.add_argument("--histogram", action="store_true", help="Print strength distribution buckets")
+    ap.add_argument("--dry-run", action="store_true", help="Preview only; don't write back to backbone_nodes")
     args = ap.parse_args()
 
-    stats = replay(domain=args.domain)
+    stats = replay(domain=args.domain, dry_run=args.dry_run)
     print(f"nodes_touched        : {stats.nodes_touched}")
     print(f"activations_replayed : {stats.activations_replayed}")
     print(f"max_strength         : {stats.max_strength}")

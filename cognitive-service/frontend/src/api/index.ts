@@ -159,6 +159,7 @@ export type ReplayResult = {
   slice_features_replayed: number
   dimensions_touched: number
   snapshots_written: number
+  dry_run?: boolean
 }
 
 export const fetchPipelineEntries = (limit = 50) =>
@@ -167,7 +168,7 @@ export const fetchPipelineEntries = (limit = 50) =>
 export const fetchPipelineHealth = (limit = 100) =>
   req<PipelineHealth>(`/ui/api/pipeline/health?limit=${limit}`)
 
-export const replayProfileMerge = (opts: { dimension?: string; limit?: number } = {}) =>
+export const replayProfileMerge = (opts: { dimension?: string; limit?: number; dry_run?: boolean } = {}) =>
   req<ReplayResult>('/ui/api/admin/replay/profile-merge', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -180,9 +181,10 @@ export type NodeStrengthReplayResult = {
   max_strength: number
   median_strength: number
   histogram: Record<string, number>
+  dry_run?: boolean
 }
 
-export const replayNodeStrength = (opts: { domain?: string } = {}) =>
+export const replayNodeStrength = (opts: { domain?: string; dry_run?: boolean } = {}) =>
   req<NodeStrengthReplayResult>('/ui/api/admin/replay/node-strength', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

@@ -173,3 +173,56 @@ export const replayProfileMerge = (opts: { dimension?: string; limit?: number } 
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(opts),
   })
+
+// ── Sandbox ───────────────────────────────────────────────────────────────────
+export type SandboxDimension = {
+  key: string
+  name: string
+  sub_dimensions: { key: string; name?: string }[]
+  score_range: [number, number]
+  current_prompt: string
+  current_rubric: string
+}
+
+export type SandboxSubDimValue = { score: number; confidence: number; evidence?: string } | null
+
+export type SandboxResultRow = {
+  entry_id: number
+  raw: string
+  baseline: Record<string, SandboxSubDimValue> | null
+  candidate: Record<string, SandboxSubDimValue> | null
+  candidate_health: { total: number; null_count: number; low_conf_count: number; midpoint_hedge_count: number }
+  error: string | null
+}
+
+export type SandboxHealthAggregate = {
+  total: number
+  null_count: number
+  low_conf_count: number
+  midpoint_hedge_count: number
+  null_ratio: number
+  low_conf_ratio: number
+  midpoint_hedge_ratio: number
+}
+
+export type SandboxRunResult = {
+  dimension: string
+  results: SandboxResultRow[]
+  baseline_health: SandboxHealthAggregate
+  candidate_health: SandboxHealthAggregate
+}
+
+export const fetchSandboxDimensions = () =>
+  req<SandboxDimension[]>('/ui/api/sandbox/dimensions')
+
+export const runSandboxExtract = (
+  dimension: string,
+  entry_ids: number[],
+  prompt_template?: string,
+  rubric?: string,
+) =>
+  req<SandboxRunResult>('/ui/api/sandbox/extract', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ dimension, entry_ids, prompt_template, rubric }),
+  })

@@ -908,3 +908,116 @@ async def process_pending():
             results.append({"id": entry_id, "status": "error", "error": str(exc)})
 
     return {"processed": len(results), "results": results}
+
+
+# ── Pipeline 可视化 / 算法 replay ────────────────────────────────────────────
+
+
+@router.get("/pipeline/entries")
+def pipeline_entries(limit: int = 50):
+    """最近 N 条 entry 的轻量列表，供 Pipeline 面板下拉选择。"""
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT e.id, e.created_at, e.processing_status,
+                      substr(coalesce(e.raw, ''), 1, 80) AS preview,
+                      pt.updated_at AS trace_updated_at
+               FROM entries e
+               LEFT JOIN pipeline_traces pt ON pt.entry_id = e.id
+               ORDER BY e.created_at DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return [
+        {
+            "id":                r["id"],
+            "created_at":        r["created_at"],
+            "processing_status": r["processing_status"],
+            "preview":           r["preview"],
+            "has_trace":         r["trace_updated_at"] is not None,
+        }
+        for r in rows
+    ]
+
+
+@router.get("/pipeline/health")
+def pipeline_health(limit: int = 100):
+    """聚合最近 N 条 entry 的 slice_extraction_health 计数。
+
+    每个维度返回总计数和占比，用于观测 prompt 质量趋势：
+    - high null_count_ratio = LLM 学会了 abstain（好）
+    - high low_conf_count_ratio = LLM 仍走旧 prompt 行为（坏）
+    - high midpoint_hedge_ratio = anchoring 残留，可能需要进一步 prompt 调整
+    """
+    with get_conn() as conn:
+        rows = conn.execute(
+            """SELECT pt.entry_id, pt.trace_json, e.created_at
+               FROM pipeline_traces pt
+               JOIN entries e ON e.id = pt.entry_id
+               ORDER BY e.created_at DESC
+               LIMIT ?""",
+            (limit,),
+        ).fetchall()
+
+    # dim_key -> {total, null_count, low_conf_count, midpoint_hedge_count, entries_with_data}
+    agg: dict[str, dict[str, int]] = {}
+    entries_seen = 0
+    for r in rows:
+        try:
+            trace = json.loads(r["trace_json"])
+        except Exception:
+            continue
+        health = trace.get("slice_extraction_health") or {}
+        if not isinstance(health, dict) or not health:
+            continue
+        entries_seen += 1
+        for dim_key, h in health.items():
+            if not isinstance(h, dict):
+                continue
+            slot = agg.setdefault(dim_key, {
+                "total": 0, "null_count": 0, "low_conf_count": 0,
+                "midpoint_hedge_count": 0, "entries_with_data": 0,
+            })
+            slot["total"] += int(h.get("total", 0))
+            slot["null_count"] += int(h.get("null_count", 0))
+            slot["low_conf_count"] += int(h.get("low_conf_count", 0))
+            slot["midpoint_hedge_count"] += int(h.get("midpoint_hedge_count", 0))
+            slot["entries_with_data"] += 1
+
+    # ratios
+    out = []
+    for dim_key, slot in sorted(agg.items()):
+        total = max(slot["total"], 1)
+        out.append({
+            "dimension": dim_key,
+            "entries_with_data":     slot["entries_with_data"],
+            "subdim_observations":   slot["total"],
+            "null_count":            slot["null_count"],
+            "low_conf_count":        slot["low_conf_count"],
+            "midpoint_hedge_count":  slot["midpoint_hedge_count"],
+            "null_ratio":            round(slot["null_count"] / total, 3),
+            "low_conf_ratio":        round(slot["low_conf_count"] / total, 3),
+            "midpoint_hedge_ratio":  round(slot["midpoint_hedge_count"] / total, 3),
+        })
+    return {"entries_scanned": len(rows), "entries_with_health": entries_seen, "by_dimension": out}
+
+
+class ReplayRequest(BaseModel):
+    dimension: str | None = None
+    limit:     int | None = None
+
+
+@router.post("/admin/replay/profile-merge")
+def admin_replay_profile_merge(req: ReplayRequest):
+    """从 slice_features 重算 profile_dimensions + profile_snapshots，零 LLM 调用。
+
+    用于：改了融合公式或 PROFILE_MERGE 配置后，想在已有数据上看新曲线。
+    可选 dimension（只重算某维度）和 limit（只重算前 N 条 entry）。
+    """
+    from scripts.replay_profile_merge import replay
+    stats = replay(dimension=req.dimension, limit=req.limit)
+    return {
+        "entries_processed":       stats.entries_processed,
+        "slice_features_replayed": stats.slice_features_replayed,
+        "dimensions_touched":      stats.dimensions_touched,
+        "snapshots_written":       stats.snapshots_written,
+    }

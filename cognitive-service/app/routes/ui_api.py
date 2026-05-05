@@ -870,6 +870,13 @@ def admin_reset(req: ResetRequest):
                       "slices", "profile_dimensions", "entries"]:
                 conn.execute("DELETE FROM sqlite_sequence WHERE name=?", (t,))
         else:
+            # scope=derived: keep entries rows but reset their *derived* fields.
+            # processing_status and situation_json are written by the pipeline,
+            # so they must go back to captured / NULL — otherwise the UI shows
+            # rows as still processed even though their slices/features are gone.
+            conn.execute(
+                "UPDATE entries SET processing_status = 'captured', situation_json = NULL"
+            )
             for t in ["backbone_activations", "backbone_edges", "backbone_nodes",
                       "pipeline_traces", "profile_snapshots", "slice_features",
                       "slices", "profile_dimensions"]:

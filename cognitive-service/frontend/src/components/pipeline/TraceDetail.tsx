@@ -139,26 +139,29 @@ function buildOutline(trace: Trace, llmCallsByStage: Record<string, LLMCallRecor
       nodes.push({ id: 'rough_retrieval', label: `Rough retrieval (${trace.rough_retrieval.length})`, depth: 1 })
     }
 
-    // node_extract_internal / external — per domain
+    // node_extract_internal / external — per domain.
+    // IMPORTANT: backend stage labels are `node_internal:{domain}` and
+    // `node_external:{domain}` (no `_extract` infix). Outline IDs must match
+    // for llmCallsByStage lookup to succeed.
     const internalDomains = Object.keys(trace.node_extract_internal || {})
     const externalDomains = Object.keys(trace.node_extract_external || {})
     if (internalDomains.length || externalDomains.length || trace.node_extract) {
       nodes.push({ id: 'node_extract', label: 'Node extract', depth: 1 })
       for (const domain of internalDomains.sort()) {
-        const calls = llmCallsByStage[`node_extract_internal:${domain}`] || []
+        const calls = llmCallsByStage[`node_internal:${domain}`] || []
         const tokens = calls.reduce((s, c) => s + (c.total_tokens || 0), 0)
         nodes.push({
-          id: `node_extract_internal:${domain}`,
+          id: `node_internal:${domain}`,
           label: `internal · ${domain}`,
           depth: 2,
           badge: tokens > 0 ? `${tokens}t` : undefined,
         })
       }
       for (const domain of externalDomains.sort()) {
-        const calls = llmCallsByStage[`node_extract_external:${domain}`] || []
+        const calls = llmCallsByStage[`node_external:${domain}`] || []
         const tokens = calls.reduce((s, c) => s + (c.total_tokens || 0), 0)
         nodes.push({
-          id: `node_extract_external:${domain}`,
+          id: `node_external:${domain}`,
           label: `external · ${domain}`,
           depth: 2,
           badge: tokens > 0 ? `${tokens}t` : undefined,
@@ -173,22 +176,16 @@ function buildOutline(trace: Trace, llmCallsByStage: Record<string, LLMCallRecor
       nodes.push({ id: 'subgraph', label: 'Local subgraph', depth: 1 })
     }
     if (trace.edge_extract) {
-      // edge_extract LLM calls grouped by domain
-      const edgeDomains = new Set<string>()
-      for (const stage of Object.keys(llmCallsByStage)) {
-        if (stage.startsWith('edge_extract:')) edgeDomains.add(stage.replace('edge_extract:', ''))
-      }
-      nodes.push({ id: 'edge_extract', label: `Edge extract (${trace.edge_extract.length})`, depth: 1 })
-      for (const domain of Array.from(edgeDomains).sort()) {
-        const calls = llmCallsByStage[`edge_extract:${domain}`] || []
-        const tokens = calls.reduce((s, c) => s + (c.total_tokens || 0), 0)
-        nodes.push({
-          id: `edge_extract:${domain}`,
-          label: domain,
-          depth: 2,
-          badge: tokens > 0 ? `${tokens}t` : undefined,
-        })
-      }
+      // edge_extract is a SINGLE global LLM call (stage='edge_extract'), not
+      // per-domain. The trace's edge_extract list is flat across all domains.
+      const calls = llmCallsByStage['edge_extract'] || []
+      const tokens = calls.reduce((s, c) => s + (c.total_tokens || 0), 0)
+      nodes.push({
+        id: 'edge_extract',
+        label: `Edge extract (${trace.edge_extract.length})`,
+        depth: 1,
+        badge: tokens > 0 ? `${tokens}t` : undefined,
+      })
     }
     if (trace.db_diff) {
       nodes.push({ id: 'db_diff', label: 'DB diff', depth: 1 })
@@ -334,9 +331,9 @@ function DetailContent({ trace, raw, stage, llmCallsByStage }: {
     )
   }
 
-  if (stage.startsWith('node_extract_internal:') || stage.startsWith('node_extract_external:')) {
-    const isInternal = stage.startsWith('node_extract_internal:')
-    const domain = stage.replace(/^node_extract_(internal|external):/, '')
+  if (stage.startsWith('node_internal:') || stage.startsWith('node_external:')) {
+    const isInternal = stage.startsWith('node_internal:')
+    const domain = stage.replace(/^node_(internal|external):/, '')
     const candidates = isInternal
       ? (trace.node_extract_internal || trace.node_extract || {})[domain]
       : (trace.node_extract_external || {})[domain]
@@ -373,30 +370,16 @@ function DetailContent({ trace, raw, stage, llmCallsByStage }: {
   }
 
   if (stage === 'edge_extract') {
+    // edge_extract is a SINGLE global LLM call (chat_json stage='edge_extract')
+    // that takes ALL confirmed_nodes and returns a flat list of edges. No
+    // per-domain breakdown.
+    const calls = llmCallsByStage['edge_extract'] || []
     return (
-      <Section title="Edge extract" subtitle="LLM 在 confirmed_nodes 间抽取关系边">
+      <Section title="Edge extract" subtitle="LLM 在所有 confirmed_nodes 间抽取关系边（单次全域调用）">
+        <KV label="Edges extracted" value={trace.edge_extract?.length ?? 0} />
         {trace.edge_extract?.length
-          ? <JsonView data={trace.edge_extract} />
+          ? <Details summary="All edges" defaultOpen><JsonView data={trace.edge_extract} /></Details>
           : <Empty>No edges extracted.</Empty>}
-      </Section>
-    )
-  }
-
-  if (stage.startsWith('edge_extract:')) {
-    const domain = stage.replace('edge_extract:', '')
-    const calls = llmCallsByStage[stage] || []
-    const edgesInDomain = (trace.edge_extract || []).filter(e => {
-      // try to determine domain from confirmed_nodes
-      const cn = trace.confirmed_nodes || []
-      const fromN = cn.find(n => n.label === e.from_label)
-      return fromN?.domain === domain
-    })
-    return (
-      <Section title={`Edge extract · ${domain}`}>
-        <KV label="Edges in this domain" value={edgesInDomain.length} />
-        {edgesInDomain.length > 0 && (
-          <Details summary="Edges" defaultOpen><JsonView data={edgesInDomain} /></Details>
-        )}
         {calls.map((c, i) => <LLMCallView key={i} call={c} />)}
       </Section>
     )

@@ -46,23 +46,48 @@ POST /query
 
 ## 核心机制
 
-### 节点 Strength 衰减
+### 节点 Strength 衰减（DWAS）
 
-每次 entry 命中某节点时，strength 按以下公式更新：
+每次 entry 命中某节点时，strength 按 **DWAS（Decay-Weighted Activation Sum）** 更新：
 
 ```
-time_decay  = exp(-λ × days_since_last_hit)
-freq_bonus  = 1 + log(1 + hit_count)
-hist_weight = time_decay × freq_bonus
-alpha       = new_conf / (hist_weight × old_strength + new_conf)
-new_strength = (1 - alpha) × old_strength + alpha × new_conf
+写入：strength_new = strength_old × exp(-λ × Δt_since_last_hit) + new_conf
+读取：effective    = stored × exp(-λ × days_since_last_hit)
 ```
 
-- **时间衰减**：长时间未触达的节点历史权重下降，新证据影响力增大
-- **频次加成**：频繁触达的节点历史权重更大，不易被单次新证据覆盖
-- **origin 升级**：external 节点被 internal 证据命中后升级为 internal，不可降级
+实现见 `app/lib/backbone_pipeline.py:_update_node_strength` 与 `effective_strength`，参数在 `app/config/graph_rules.py:NODE_STRENGTH`。
+
+#### 物理意义
+
+- **strength**：节点的"近期反复出现强度"（动态关注度），不是稳态隐变量；范围 [0, ~5+]，无上界（可选 `cap` 截断）。
+- **写入时衰减再累加**：先按距上次命中的天数衰减 stored 值，再加上本次 confidence。高频高置信节点累加上去，长期不命中节点自然下沉。
+- **读取时再衰减一次**：召回排序看的是 effective 值，让"已经很久没被激活"的节点不会顽固压在前列。
+- **origin 升级**：external 节点被 internal 证据命中后升级为 internal，不可降级。
 
 边权重在召回时乘以独立的时间衰减因子（`max(floor, exp(-λ × days))`），长时间未强化的关系边影响力减弱。
+
+#### 关键性质
+
+| 性质 | 说明 |
+|---|---|
+| 自然无界（典型 0-5+）| 高频高置信节点可达 5-10，区分"老热点"和"近期升起" |
+| 失活自动衰减 | 不命中即下沉，无需 GC |
+| 单参数 λ | 沿用 0.01 / 半衰期 69 天 |
+| 完全可 replay | 从 `backbone_activations` 表能精确重建任意时刻的 strength |
+
+#### 阈值与排序权重（NODE_STRENGTH config）
+
+`anchor_min` / `blindspot_min` 决定 agent 锚点 / 盲区扫描的下限；rank weights 决定召回排序时 strength / new_conf / rough_sim 的相对重要性。**默认值是基于 DWAS 数学的粗略估计，强烈建议在你真实数据上校准**：
+
+1. 在 Pipeline tab 点 **"Replay node_strength"** → 看直方图
+2. 取 p70-p80 作 `anchor_min`、p50-p60 作 `blindspot_min`
+3. 改 `NODE_STRENGTH` config，重启服务
+
+如果发现 strength 在召回排序中过度压制其他信号（高 strength 节点永远拍前），调小 `rank_strength_weight`（如 0.2）。
+
+#### 为什么不是贝叶斯（vs profile_merge）
+
+profile_merge 估计的是**稳态隐变量**（用户某维度的"真实值"），需要收敛。strength 反映的是**动态关注度**（recurring patterns），收敛反而是 bug —— 用户兴趣转移时该跟得上。两者数学范畴不同。
 
 ### Profile Merge（人格画像融合）
 

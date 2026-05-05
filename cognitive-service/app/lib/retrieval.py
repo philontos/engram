@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from app.config.graph_rules import EDGE_DECAY, RETRIEVAL
+from app.config.graph_rules import EDGE_DECAY, NODE_STRENGTH, RETRIEVAL
 from app.lib.db import get_conn
 
 
@@ -125,8 +125,13 @@ def opposite_retrieval(seed_nodes: list[dict]) -> list[dict]:
     return result
 
 
-def find_blindspots(seed_nodes: list[dict], min_strength: float = 0.5) -> list[dict]:
-    """盲区候选：内源 + 高 strength + 无对立边 → 用户自认为确定但缺乏张力的节点。"""
+def find_blindspots(seed_nodes: list[dict], min_strength: float | None = None) -> list[dict]:
+    """盲区候选：内源 + 高 strength + 无对立边 → 用户自认为确定但缺乏张力的节点。
+
+    min_strength 默认从 NODE_STRENGTH.blindspot_min 读取（可由 config 调）。
+    """
+    if min_strength is None:
+        min_strength = NODE_STRENGTH["blindspot_min"]
     candidates = [
         n for n in seed_nodes
         if n.get("origin") == "internal"

@@ -27,6 +27,27 @@ NODE_STRENGTH = {
     "lambda": 0.01,  # 时间衰减系数，半衰期约 69 天（与 EDGE_DECAY 区分；后者更慢）
     "cap":    None,  # 可选硬上限。None 表示不截断（exp 衰减天然防 runaway）；
                      # 想限制极端积累可设浮点（如 10.0）
+
+    # ── 阈值 ──────────────────────────────────────────────────────────
+    # 旧 [0,1] 范围下的硬编码（0.6 / 0.45 / 0.5）已不适用。新 DWAS 分布典型
+    # 0-5+，下列默认值是基于"高频高置信节点累加 2-3 次后 ≈ 1.5"的粗略估计。
+    #
+    # 强烈建议：用 Pipeline tab 的 "Replay node_strength" 在你真实数据上跑
+    # 一次，看直方图分布（<0.5 / 0.5-1 / 1-1.5 / 1.5-2 / 2-3 / 3-5 / >=5），
+    # 然后取 p70-p80 作为 anchor_min、p50-p60 作为 blindspot_min。
+    "anchor_min":     1.5,  # agent_runtime 视为"高 strength internal 锚点"的下限
+    "blindspot_min": 1.0,   # 盲区扫描门槛（高 strength 但无对立边 = 潜在盲区）
+
+    # ── _precise_retrieval 复合排序权重 ─────────────────────────────────
+    # rank = ws × strength + wc × new_conf + wr × rough_sim
+    #
+    # 注意：DWAS 后 strength ∈ [0, ~5+]，new_conf 和 rough_sim 仍 ∈ [0, 1]。
+    # 默认权重沿用旧值（0.5/0.3/0.2），意味着高 strength 节点在排序中天然
+    # 占主导（这通常是想要的）。如果观察到 strength 过度压制其他信号，
+    # 把 strength 权重调小（如 0.2）。
+    "rank_strength_weight": 0.5,
+    "rank_new_conf_weight": 0.3,
+    "rank_rough_sim_weight": 0.2,
 }
 
 # 边权重增量算法参数（LLM 只输出 confidence，weight 由算法计算）

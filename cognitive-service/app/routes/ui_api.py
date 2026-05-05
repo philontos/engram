@@ -1021,3 +1021,154 @@ def admin_replay_profile_merge(req: ReplayRequest):
         "dimensions_touched":      stats.dimensions_touched,
         "snapshots_written":       stats.snapshots_written,
     }
+
+
+# ── Prompt Sandbox ──────────────────────────────────────────────────────────
+# 在不污染生产数据的前提下，对指定 entry 子集用候选 prompt 跑抽取，并与
+# 现有 slice_features（基线）做 diff。仅调 LLM，不写 slice_features /
+# profile_dimensions。供改 prompt 时低成本验证效果。
+
+
+@router.get("/sandbox/dimensions")
+def sandbox_dimensions():
+    """列出 score-format 维度（sandbox 一次只调一个），含当前 prompt + rubric 文本。"""
+    from app.lib.config_loader import DIMENSIONS as _DIMS
+    out = []
+    for d in _DIMS:
+        if d.get("summary_format") != "scores" or not d.get("enabled", True):
+            continue
+        out.append({
+            "key":             d["key"],
+            "name":            d.get("name", d["key"]),
+            "sub_dimensions":  d.get("sub_dimensions") or [],
+            "score_range":     d.get("score_range") or [0, 100],
+            "current_prompt":  d.get("_prompt", ""),
+            "current_rubric":  d.get("_rubric", ""),
+        })
+    return out
+
+
+class SandboxExtractRequest(BaseModel):
+    dimension:        str
+    entry_ids:        list[int]
+    prompt_template:  str | None = None  # if None, use current
+    rubric:           str | None = None  # if None, use current
+
+
+@router.post("/sandbox/extract")
+async def sandbox_extract(req: SandboxExtractRequest):
+    """对指定 entry 跑候选 prompt，返回逐条 baseline vs candidate 抽取 + 聚合 health。
+
+    完全不写 DB。每条 entry 1 次 LLM 调用 × len(entry_ids) 次总调用。
+    建议 entry 数 ≤ 10 控制成本。
+    """
+    from string import Template
+
+    from app.lib.config_loader import DIMENSION_MAP
+    from app.lib.slice_pipeline import _extraction_health, _normalize_extraction
+    from shared.llm import StructuredLLMError, chat_json, is_structured_llm_configured
+
+    if not is_structured_llm_configured():
+        raise HTTPException(status_code=400, detail="LLM not configured")
+
+    dim_cfg = DIMENSION_MAP.get(req.dimension)
+    if not dim_cfg or dim_cfg.get("summary_format") != "scores":
+        raise HTTPException(status_code=400, detail=f"unknown or non-score dimension: {req.dimension}")
+
+    if not req.entry_ids:
+        raise HTTPException(status_code=400, detail="entry_ids must be non-empty")
+    if len(req.entry_ids) > 30:
+        raise HTTPException(status_code=400, detail="entry_ids capped at 30 to control LLM cost")
+
+    prompt_tmpl = req.prompt_template if req.prompt_template is not None else dim_cfg.get("_prompt", "")
+    rubric_text = req.rubric          if req.rubric          is not None else dim_cfg.get("_rubric", "")
+    if not prompt_tmpl:
+        raise HTTPException(status_code=400, detail="empty prompt template")
+
+    # Pull raw + baseline (existing slice_features for this dim) per entry
+    placeholders = ",".join(["?"] * len(req.entry_ids))
+    with get_conn() as conn:
+        entry_rows = conn.execute(
+            f"SELECT id, raw FROM entries WHERE id IN ({placeholders})",
+            req.entry_ids,
+        ).fetchall()
+        baseline_rows = conn.execute(
+            f"""SELECT s.entry_id, sf.content_json
+                FROM slice_features sf
+                JOIN slices s ON s.id = sf.slice_id
+                WHERE s.entry_id IN ({placeholders}) AND sf.dimension = ?""",
+            [*req.entry_ids, req.dimension],
+        ).fetchall()
+    raw_by_id     = {r["id"]: r["raw"] or "" for r in entry_rows}
+    baseline_by_id: dict[int, dict] = {}
+    for r in baseline_rows:
+        try:
+            baseline_by_id[r["entry_id"]] = json.loads(r["content_json"])
+        except Exception:
+            baseline_by_id[r["entry_id"]] = {}
+
+    results = []
+    baseline_health_agg = {"total": 0, "null_count": 0, "low_conf_count": 0, "midpoint_hedge_count": 0}
+    candidate_health_agg = {"total": 0, "null_count": 0, "low_conf_count": 0, "midpoint_hedge_count": 0}
+
+    for eid in req.entry_ids:
+        raw = raw_by_id.get(eid, "")
+        if not raw:
+            results.append({"entry_id": eid, "raw": "", "baseline": None, "candidate": None,
+                            "candidate_health": {}, "error": "entry not found"})
+            continue
+
+        # Baseline: existing extraction (may be empty if never processed)
+        baseline = baseline_by_id.get(eid)
+        b_normalized = _normalize_extraction(dim_cfg, baseline) if baseline is not None else {}
+        b_health = _extraction_health(dim_cfg, b_normalized) if b_normalized else {}
+
+        # Candidate: run LLM with the candidate prompt+rubric (no profile_summary
+        # injected — sandbox tests the prompt in isolation, not its interaction
+        # with current profile)
+        system_prompt = Template(prompt_tmpl).safe_substitute(
+            rubric=rubric_text, profile_summary="(sandbox — no profile context)", raw_entry=raw,
+        )
+        try:
+            raw_candidate = await chat_json(
+                system_prompt=system_prompt, user_prompt="",
+                stage=f"sandbox:{req.dimension}",
+                context={"entry_id": eid, "raw_chars": len(raw)},
+            )
+        except StructuredLLMError as e:
+            results.append({"entry_id": eid, "raw": raw[:200], "baseline": b_normalized or None,
+                            "candidate": None, "candidate_health": {}, "error": str(e)})
+            continue
+
+        c_normalized = _normalize_extraction(dim_cfg, raw_candidate)
+        c_health = _extraction_health(dim_cfg, c_normalized)
+
+        # Aggregate
+        for slot, h in [(baseline_health_agg, b_health), (candidate_health_agg, c_health)]:
+            for k in ("total", "null_count", "low_conf_count", "midpoint_hedge_count"):
+                slot[k] += int(h.get(k, 0))
+
+        results.append({
+            "entry_id":         eid,
+            "raw":              raw[:300],   # preview, not full
+            "baseline":         b_normalized if b_normalized else None,
+            "candidate":        c_normalized,
+            "candidate_health": c_health,
+            "error":            None,
+        })
+
+    def _ratios(agg):
+        total = max(agg["total"], 1)
+        return {
+            **agg,
+            "null_ratio":           round(agg["null_count"] / total, 3),
+            "low_conf_ratio":       round(agg["low_conf_count"] / total, 3),
+            "midpoint_hedge_ratio": round(agg["midpoint_hedge_count"] / total, 3),
+        }
+
+    return {
+        "dimension":         req.dimension,
+        "results":           results,
+        "baseline_health":   _ratios(baseline_health_agg),
+        "candidate_health":  _ratios(candidate_health_agg),
+    }

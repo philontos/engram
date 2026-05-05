@@ -547,10 +547,14 @@ async def _resolve_nodes(
 # ---------------------------------------------------------------------------
 
 def _precise_retrieval(confirmed: list[dict]) -> dict:
+    ws = NODE_STRENGTH["rank_strength_weight"]
+    wc = NODE_STRENGTH["rank_new_conf_weight"]
+    wr = NODE_STRENGTH["rank_rough_sim_weight"]
+
     def rank(n: dict) -> float:
-        return (0.5 * float(n.get("strength", 0))
-                + 0.3 * float(n.get("new_conf") or 0)
-                + 0.2 * float(n.get("rough_sim") or 0))
+        return (ws * float(n.get("strength", 0))
+                + wc * float(n.get("new_conf") or 0)
+                + wr * float(n.get("rough_sim") or 0))
 
     existing = [n for n in confirmed if not n.get("is_new")]
     new_nodes = [n for n in confirmed if n.get("is_new")]

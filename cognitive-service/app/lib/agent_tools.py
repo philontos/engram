@@ -15,7 +15,7 @@ import json
 from dataclasses import dataclass, field
 from typing import Any
 
-from app.config.graph_rules import EDGE_DECAY  # noqa: F401  (decay logic lives in retrieval helpers)
+from app.config.graph_rules import EDGE_DECAY, NODE_STRENGTH  # noqa: F401  (decay logic lives in retrieval helpers)
 from app.lib.config_loader import DIMENSIONS
 from app.lib.db import get_conn
 from app.lib.embed import embed
@@ -104,7 +104,7 @@ def _compute_evolution_paths(
 
     internal_anchors = sorted(
         [n for n in nodes.values()
-         if n.get("origin") == "internal" and float(n.get("strength", 0)) >= 0.6],
+         if n.get("origin") == "internal" and float(n.get("strength", 0)) >= NODE_STRENGTH["anchor_min"]],
         key=lambda n: float(n.get("strength", 0)),
         reverse=True,
     )[:6]
@@ -356,7 +356,7 @@ AGENT_TOOLS: list[dict] = [
             "parameters": {
                 "type": "object",
                 "properties": {
-                    "min_strength": {"type": "number", "description": "Default 0.45."},
+                    "min_strength": {"type": "number", "description": "Default from NODE_STRENGTH.blindspot_min."},
                 },
             },
         },
@@ -911,7 +911,7 @@ async def _t_compare_nodes(args: dict, ctx: ToolContext) -> dict:
 
 
 async def _t_list_blindspots(args: dict, ctx: ToolContext) -> dict:
-    min_s = float(args.get("min_strength", 0.45))
+    min_s = float(args.get("min_strength", NODE_STRENGTH["blindspot_min"]))
     with get_conn() as conn:
         rows = conn.execute(
             "SELECT id, label, domain, node_type, origin, strength, description "

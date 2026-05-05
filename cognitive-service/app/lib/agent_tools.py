@@ -65,7 +65,30 @@ def _q2_system(profile_summary: str, mood_stats: str = "", raw_block: str = "") 
     raw_section = f"\n\n{raw_block}" if raw_block else ""
     framework_lines, cite_examples = _active_frameworks_lines()
     frameworks_block = "\n".join(framework_lines) if framework_lines else "(profile dimensions are injected from user configuration)"
-    cite_hint = ", ".join(cite_examples[:3]) if cite_examples else "'<sub_key>=<score> → ...'"
+
+    # Defensive citation guidance: only ask for "<key>=<score>" syntax when at least
+    # one active dimension actually has scores in profile_summary. Otherwise the LLM
+    # would hallucinate numbers. Also handle the empty-profile case (early users)
+    # where there's nothing to cite from.
+    has_scored_dims  = bool(cite_examples)
+    profile_is_empty = (
+        not profile_summary.strip()
+        or profile_summary.strip() == "(no historical profile yet)"
+    )
+    if profile_is_empty:
+        cite_line = (
+            "The user's profile is still empty (early-stage user). Do NOT cite profile values; "
+            "anchor every claim in the raw records below instead."
+        )
+    elif has_scored_dims:
+        cite_hint = ", ".join(cite_examples[:3])
+        cite_line = f"Cite specific sub-key scores when making each claim (e.g., {cite_hint})."
+    else:
+        cite_line = (
+            "The active dimensions are non-numeric (key_value or free-form). Cite specific "
+            "sub-key values shown in the profile (e.g., 'occupation=engineer'); do NOT invent scores."
+        )
+
     return (
         "You are a personality / values consultant. Interpret the user's profile strictly by the dimensions "
         "and sub-keys provided below — do not assume any framework that is not listed.\n\n"
@@ -75,7 +98,7 @@ def _q2_system(profile_summary: str, mood_stats: str = "", raw_block: str = "") 
         "the judgments they are most likely to over-lean toward, and the cognitive blind spots related to their profile.\n"
         "Anchor every claim in the raw records: cite a specific phrase the user wrote, not a generic inference. "
         "If the raw records show the question concerns A, do not analyze it as if it concerned B.\n"
-        f"Cite specific sub-key scores when making each claim (e.g., {cite_hint}).\n"
+        f"{cite_line}\n"
         "Do not give advice — only reveal. Match the user's language. Keep it under ~120 words.\n\n"
         f"## User profile\n{profile_summary}{mood_section}{raw_section}"
     )

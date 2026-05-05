@@ -19,9 +19,21 @@ Evaluate three dimensions together:
 
 ## Decision rules
 - Only activate domains with substantive content to build — do not pad
-- effort_weight (0-1): the higher the content richness and alignment with current focus, the higher the weight
 - Typically activate 1-3 domains; do not activate all unless content clearly spans multiple domains
 - If the input is pure daily log with no knowledge-extractable content, return an empty array
+
+## effort_weight scale (must align with downstream node_extract budget)
+
+The effort_weight you choose directly controls how many nodes the per-domain extractor will build. Use these anchors — do NOT improvise the scale:
+
+| effort_weight | Downstream budget | When to use |
+|---|---|---|
+| 0.8–1.0 | 5–8 nodes, thorough extraction | Domain is the **dominant** topic, raw_entry has dense, distinct concepts |
+| 0.5–0.7 | 3–5 nodes, focused extraction | Domain is **clearly relevant** with multiple substantive references |
+| 0.2–0.4 | 1–3 nodes, essentials only | Domain is **touched lightly**, only a few clear concepts to capture |
+| < 0.2 | ≤1 node, often skipped | Domain is **tangentially mentioned**; consider not activating at all |
+
+Calibration check: if you assign 0.8 to multiple domains, you're claiming raw_entry has 15+ distinct concepts. That's rare — recheck.
 
 ## Output (strict JSON)
 {

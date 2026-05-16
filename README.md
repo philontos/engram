@@ -194,12 +194,14 @@ Then edit `api/.env` and fill in your LLM credentials. Two options:
 ```bash
 cd api
 source .venv/bin/activate
-PYTHONPATH=.. ENGRAM_DEV=1 uvicorn app.main:app --reload --port 18080
+PYTHONPATH=.. ENGRAM_DEV=1 uvicorn app.main:app \
+  --reload --reload-dir . --reload-dir ../shared \
+  --port 18080
 ```
 
 Ready when you see `Application startup complete.`
 
-> **Why `PYTHONPATH=..`?** `shared/` lives at the repo root (one level up from `api/`); this puts it on Python's import path. Inside Docker the Dockerfile copies it in, so the env var isn't needed there.
+> **Why `PYTHONPATH=..` + `--reload-dir ../shared`?** `shared/` lives at the repo root (one level up from `api/`); `PYTHONPATH=..` puts it on Python's import path, and `--reload-dir ../shared` makes uvicorn pick up edits to `shared/` (the default `--reload` only watches the CWD). Inside Docker neither is needed — the Dockerfile copies `shared/` in and there's no reload.
 
 **Terminal 2 — Web on `:5173`**
 

@@ -194,12 +194,14 @@ pnpm install
 ```bash
 cd api
 source .venv/bin/activate
-PYTHONPATH=.. ENGRAM_DEV=1 uvicorn app.main:app --reload --port 18080
+PYTHONPATH=.. ENGRAM_DEV=1 uvicorn app.main:app \
+  --reload --reload-dir . --reload-dir ../shared \
+  --port 18080
 ```
 
 看到 `Application startup complete.` 即就绪。
 
-> **为什么要 `PYTHONPATH=..`？** `shared/` 在仓库根目录（`api/` 的上一级），这一步把它加进 Python 的 import path。Docker 镜像里 Dockerfile 已经把 `shared/` 拷贝进去了，所以容器内不需要这个环境变量。
+> **为什么要 `PYTHONPATH=..` 加 `--reload-dir ../shared`？** `shared/` 在仓库根目录（`api/` 的上一级）：`PYTHONPATH=..` 把它加进 Python 的 import path，`--reload-dir ../shared` 让 uvicorn 把 `shared/` 也纳入热重载监控（默认 `--reload` 只盯 CWD）。Docker 镜像里 Dockerfile 把 `shared/` 拷贝进去且不需要 reload，所以两个都不需要。
 
 **Terminal 2 — Web，端口 `:5173`**
 

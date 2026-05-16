@@ -1,0 +1,26 @@
+# Default deployment mode: HTTP only, intended for Tailscale-private or
+# LAN-only access. For public HTTPS, see Caddyfile.https.example.
+#
+# Caddy is the only entrypoint on :80. It splits traffic:
+#   - known API path prefixes → api:8080
+#   - everything else (including SPA routes) → web:80
+#
+# Keep this list in sync with web/vite.config.ts (API_PROXIES).
+
+:80 {
+    @api {
+        path /capture* /import* /entries/* /query* /ui/api/* /health
+    }
+    handle @api {
+        reverse_proxy api:8080
+    }
+
+    handle {
+        reverse_proxy web:80
+    }
+
+    log {
+        output stdout
+        format console
+    }
+}

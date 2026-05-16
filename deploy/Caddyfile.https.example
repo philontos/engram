@@ -1,0 +1,30 @@
+# Public HTTPS deployment template.
+# To use:
+#   1. Point your domain's A record at the VPS IP.
+#   2. Copy this file: cp Caddyfile.https.example Caddyfile.tailscale
+#      (overwrite the active Caddyfile; or change docker-compose to point at this file)
+#   3. Replace "engram.example.com" with your real domain.
+#   4. In docker-compose.yml, expose port 443 in addition to 80:
+#         ports:
+#           - "80:80"
+#           - "443:443"
+#   5. docker compose up -d --build
+#
+# Caddy will auto-provision a Let's Encrypt cert. No further config needed.
+#
+# WARNING: v1 has no built-in auth. Do NOT expose Engram to the public internet
+# unless you put basic-auth or an SSO proxy in front. Engram stores private
+# cognitive content.
+
+engram.example.com {
+    @api {
+        path /capture* /import* /entries/* /query* /ui/api/* /health
+    }
+    handle @api {
+        reverse_proxy api:8080
+    }
+
+    handle {
+        reverse_proxy web:80
+    }
+}

@@ -1,0 +1,42 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: api/Dockerfile
+    expose:
+      - "8080"
+    volumes:
+      # Host: <repo>/data/cognitive/   →   Container: /app/data
+      # Path preserved from the previous docker-compose.yml so existing user data
+      # (at <repo>/data/cognitive/cognitive.db) is read without migration.
+      # DB_PATH default is ./data/cognitive.db (relative to WORKDIR /app), so the
+      # DB lands at /app/data/cognitive.db inside container = <repo>/data/cognitive/cognitive.db on host.
+      - ../data/cognitive:/app/data
+    env_file:
+      - ../api/.env
+    restart: unless-stopped
+
+  web:
+    build:
+      context: ..
+      dockerfile: web/Dockerfile
+    expose:
+      - "80"
+    restart: unless-stopped
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+    volumes:
+      - ./Caddyfile.tailscale:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    restart: unless-stopped
+    depends_on:
+      - api
+      - web
+
+volumes:
+  caddy_data:
+  caddy_config:

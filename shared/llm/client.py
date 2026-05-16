@@ -229,6 +229,39 @@ def _looks_like_json_format_rejection(status_code: int, body: str) -> bool:
     return any(n in low for n in needles)
 
 
+def _looks_like_temperature_rejection(status_code: int, body: str) -> bool:
+    """Detect provider 400s where the cause is the `temperature` parameter.
+
+    Anthropic's newer extended-thinking models (e.g. claude-opus-4-7) deprecated
+    temperature; passing it through an OpenAI-compat proxy yields a 400 like
+    `temperature is deprecated for this model`. Retry without it.
+    """
+    if status_code != 400:
+        return False
+    low = (body or "").lower()
+    if "temperature" not in low:
+        return False
+    return any(n in low for n in ("deprecated", "unsupported", "not supported", "not allowed"))
+
+
+def _strip_unsupported_params_if_rejected(payload: dict, status_code: int, body: str) -> bool:
+    """Remove provider-rejected params from `payload` in-place.
+
+    Returns True if the payload was modified — caller should retry once with
+    the stripped payload. Currently handles `response_format` and `temperature`.
+    """
+    if status_code != 400:
+        return False
+    changed = False
+    if "response_format" in payload and _looks_like_json_format_rejection(status_code, body):
+        payload.pop("response_format", None)
+        changed = True
+    if "temperature" in payload and _looks_like_temperature_rejection(status_code, body):
+        payload.pop("temperature", None)
+        changed = True
+    return changed
+
+
 async def chat_json(
     *, system_prompt: str, user_prompt: str,
     stage: str = "", context: dict | None = None,
@@ -283,13 +316,11 @@ async def chat_json(
     try:
         resp = await _post(base_payload)
 
-        # Auto-fallback: provider rejected response_format → retry without it.
-        if (
-            "response_format" in base_payload
-            and _looks_like_json_format_rejection(resp.status_code, resp.text)
-        ):
-            retry_payload = {k: v for k, v in base_payload.items() if k != "response_format"}
-            resp = await _post(retry_payload)
+        # Auto-fallback: strip provider-rejected params (response_format on
+        # Anthropic OpenAI-compat, temperature on Claude extended-thinking
+        # models) and retry once.
+        if _strip_unsupported_params_if_rejected(base_payload, resp.status_code, resp.text):
+            resp = await _post(base_payload)
 
         duration_ms = int((time.monotonic() - start) * 1000)
 
@@ -393,15 +424,16 @@ async def chat_with_tools(
 
     try:
         async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
-            resp = await _post_with_retry(
-                client,
-                f"{config['base_url']}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {config['api_key']}",
-                    "Content-Type": "application/json",
-                },
-                json_body=payload,
-            )
+            url = f"{config['base_url']}/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {config['api_key']}",
+                "Content-Type": "application/json",
+            }
+            resp = await _post_with_retry(client, url, headers=headers, json_body=payload)
+            # Auto-fallback: strip params the provider rejected (e.g. temperature
+            # on Claude extended-thinking models) and retry once.
+            if _strip_unsupported_params_if_rejected(payload, resp.status_code, resp.text):
+                resp = await _post_with_retry(client, url, headers=headers, json_body=payload)
         duration_ms = int((time.monotonic() - start) * 1000)
 
         if resp.status_code >= 400:
@@ -489,75 +521,81 @@ async def chat_with_tools_stream(
 
     try:
         async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
-            async with client.stream(
-                "POST",
-                f"{config['base_url']}/chat/completions",
-                headers={
-                    "Authorization": f"Bearer {config['api_key']}",
-                    "Content-Type": "application/json",
-                },
-                json=payload,
-            ) as resp:
-                if resp.status_code >= 400:
-                    body = await resp.aread()
-                    _record_llm_call({
-                        "stage": stage or "unknown", "model": config["model"],
-                        "prompt_chars": prompt_chars,
-                        "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
-                        "duration_ms": int((time.monotonic() - start) * 1000),
-                        "context": context or {},
-                        "status": "http_error",
-                        "error": f"status={resp.status_code}",
-                    })
-                    raise StructuredLLMError(
-                        f"Tool-call stream LLM failed: status={resp.status_code} body={body[:400]!r}"
-                    )
-                async for line in resp.aiter_lines():
-                    if not line or not line.startswith("data:"):
-                        continue
-                    chunk = line[5:].strip()
-                    if chunk == "[DONE]":
-                        break
-                    try:
-                        obj = json.loads(chunk)
-                    except json.JSONDecodeError:
-                        continue
-                    if isinstance(obj.get("usage"), dict):
-                        usage = obj["usage"]
-                    choices = obj.get("choices") or []
-                    if not choices:
-                        continue
-                    choice = choices[0]
-                    fr = choice.get("finish_reason")
-                    if fr:
-                        finish_reason = fr
-                    delta = choice.get("delta") or {}
-                    text_delta = delta.get("content")
-                    if text_delta:
-                        content_buf += text_delta
-                        yield {"type": "content_delta", "delta": text_delta}
-                    for tc_delta in delta.get("tool_calls") or []:
-                        idx = tc_delta.get("index", 0)
-                        slot = tc_acc.setdefault(idx, {
-                            "id": None,
-                            "type": "function",
-                            "function": {"name": "", "arguments": ""},
+            url = f"{config['base_url']}/chat/completions"
+            headers = {
+                "Authorization": f"Bearer {config['api_key']}",
+                "Content-Type": "application/json",
+            }
+            # Two-attempt loop: if the provider rejects a param (e.g. temperature
+            # on Claude 4.x), strip it and reopen the stream once.
+            for attempt in (1, 2):
+                async with client.stream("POST", url, headers=headers, json=payload) as resp:
+                    if resp.status_code >= 400:
+                        body = await resp.aread()
+                        body_text = body.decode("utf-8", errors="replace")
+                        if attempt == 1 and _strip_unsupported_params_if_rejected(
+                            payload, resp.status_code, body_text
+                        ):
+                            continue
+                        _record_llm_call({
+                            "stage": stage or "unknown", "model": config["model"],
+                            "prompt_chars": prompt_chars,
+                            "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                            "duration_ms": int((time.monotonic() - start) * 1000),
+                            "context": context or {},
+                            "status": "http_error",
+                            "error": f"status={resp.status_code}",
                         })
-                        if tc_delta.get("id"):
-                            slot["id"] = tc_delta["id"]
-                        fn = tc_delta.get("function") or {}
-                        if fn.get("name"):
-                            slot["function"]["name"] = fn["name"]
-                        args_piece = fn.get("arguments")
-                        if args_piece is not None:
-                            slot["function"]["arguments"] += args_piece
-                        yield {
-                            "type": "tool_call_partial",
-                            "index": idx,
-                            "id": slot["id"],
-                            "name": slot["function"]["name"] or None,
-                            "arguments_delta": args_piece or "",
-                        }
+                        raise StructuredLLMError(
+                            f"Tool-call stream LLM failed: status={resp.status_code} body={body[:400]!r}"
+                        )
+                    async for line in resp.aiter_lines():
+                        if not line or not line.startswith("data:"):
+                            continue
+                        chunk = line[5:].strip()
+                        if chunk == "[DONE]":
+                            break
+                        try:
+                            obj = json.loads(chunk)
+                        except json.JSONDecodeError:
+                            continue
+                        if isinstance(obj.get("usage"), dict):
+                            usage = obj["usage"]
+                        choices = obj.get("choices") or []
+                        if not choices:
+                            continue
+                        choice = choices[0]
+                        fr = choice.get("finish_reason")
+                        if fr:
+                            finish_reason = fr
+                        delta = choice.get("delta") or {}
+                        text_delta = delta.get("content")
+                        if text_delta:
+                            content_buf += text_delta
+                            yield {"type": "content_delta", "delta": text_delta}
+                        for tc_delta in delta.get("tool_calls") or []:
+                            idx = tc_delta.get("index", 0)
+                            slot = tc_acc.setdefault(idx, {
+                                "id": None,
+                                "type": "function",
+                                "function": {"name": "", "arguments": ""},
+                            })
+                            if tc_delta.get("id"):
+                                slot["id"] = tc_delta["id"]
+                            fn = tc_delta.get("function") or {}
+                            if fn.get("name"):
+                                slot["function"]["name"] = fn["name"]
+                            args_piece = fn.get("arguments")
+                            if args_piece is not None:
+                                slot["function"]["arguments"] += args_piece
+                            yield {
+                                "type": "tool_call_partial",
+                                "index": idx,
+                                "id": slot["id"],
+                                "name": slot["function"]["name"] or None,
+                                "arguments_delta": args_piece or "",
+                            }
+                    break  # success — exit attempt loop
     except StructuredLLMError:
         raise
     except Exception as exc:
@@ -625,51 +663,57 @@ async def chat_text_stream(
     start = time.monotonic()
 
     async with httpx.AsyncClient(timeout=LLM_TIMEOUT_SECONDS) as client:
-        async with client.stream(
-            "POST",
-            f"{config['base_url']}/chat/completions",
-            headers={
-                "Authorization": f"Bearer {config['api_key']}",
-                "Content-Type": "application/json",
-            },
-            json=payload,
-        ) as resp:
-            if resp.status_code >= 400:
-                body = await resp.aread()
-                _record_llm_call({
-                    "stage": stage or "unknown", "model": config["model"],
-                    "prompt_chars": prompt_chars,
-                    "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
-                    "duration_ms": int((time.monotonic() - start) * 1000),
-                    "context": context or {},
-                    "status": "http_error",
-                    "error": f"status={resp.status_code}",
-                })
-                raise StructuredLLMError(
-                    f"Stream LLM failed: status={resp.status_code} body={body[:400]!r}"
-                )
-            async for line in resp.aiter_lines():
-                if not line or not line.startswith("data:"):
-                    continue
-                chunk = line[5:].strip()
-                if chunk == "[DONE]":
-                    break
-                try:
-                    obj = json.loads(chunk)
-                except json.JSONDecodeError:
-                    continue
-                if isinstance(obj.get("usage"), dict):
-                    usage = obj["usage"]
-                choices = obj.get("choices") or []
-                if not choices:
-                    continue
-                try:
-                    delta = choices[0]["delta"].get("content") or ""
-                except (KeyError, IndexError, TypeError):
-                    continue
-                if delta:
-                    completion_chars += len(delta)
-                    yield delta
+        url = f"{config['base_url']}/chat/completions"
+        headers = {
+            "Authorization": f"Bearer {config['api_key']}",
+            "Content-Type": "application/json",
+        }
+        # Two-attempt loop: strip provider-rejected params (e.g. temperature on
+        # Claude 4.x) and reopen the stream once.
+        for attempt in (1, 2):
+            async with client.stream("POST", url, headers=headers, json=payload) as resp:
+                if resp.status_code >= 400:
+                    body = await resp.aread()
+                    body_text = body.decode("utf-8", errors="replace")
+                    if attempt == 1 and _strip_unsupported_params_if_rejected(
+                        payload, resp.status_code, body_text
+                    ):
+                        continue
+                    _record_llm_call({
+                        "stage": stage or "unknown", "model": config["model"],
+                        "prompt_chars": prompt_chars,
+                        "prompt_tokens": 0, "completion_tokens": 0, "total_tokens": 0,
+                        "duration_ms": int((time.monotonic() - start) * 1000),
+                        "context": context or {},
+                        "status": "http_error",
+                        "error": f"status={resp.status_code}",
+                    })
+                    raise StructuredLLMError(
+                        f"Stream LLM failed: status={resp.status_code} body={body[:400]!r}"
+                    )
+                async for line in resp.aiter_lines():
+                    if not line or not line.startswith("data:"):
+                        continue
+                    chunk = line[5:].strip()
+                    if chunk == "[DONE]":
+                        break
+                    try:
+                        obj = json.loads(chunk)
+                    except json.JSONDecodeError:
+                        continue
+                    if isinstance(obj.get("usage"), dict):
+                        usage = obj["usage"]
+                    choices = obj.get("choices") or []
+                    if not choices:
+                        continue
+                    try:
+                        delta = choices[0]["delta"].get("content") or ""
+                    except (KeyError, IndexError, TypeError):
+                        continue
+                    if delta:
+                        completion_chars += len(delta)
+                        yield delta
+                break  # success — exit attempt loop
 
     duration_ms = int((time.monotonic() - start) * 1000)
     _record_llm_call({

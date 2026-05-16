@@ -157,21 +157,82 @@ Every entry contributes signals. Your profile evolves. The graph grows denser. O
 
 ### Local development (no Docker required)
 
+Best for iterating on code: backend hot-reloads on `.py` changes, frontend has Vite HMR. Two terminals.
+
+**Prerequisites:** Python 3.12+, pnpm (Node 20+), and an LLM API key (any OpenAI-compatible provider — OpenAI / Anthropic / DeepSeek / Moonshot / 智谱 / Ollama / etc.).
+
+#### One-time setup
+
 ```bash
-# Terminal 1: API (FastAPI + hot reload)
+# API: create venv, install deps, copy env template
 cd api
-python -m venv .venv && source .venv/bin/activate
+python3.12 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
-cp .env.example .env  # then fill in LLM_BASE_URL / LLM_API_KEY / LLM_MODEL / EMBED_MODEL
-PYTHONPATH=.. ENGRAM_DEV=1 uvicorn app.main:app --reload --port 18080
+cp .env.example .env
 
-# Terminal 2: Web (Vite dev server with HMR)
-cd web
+# Web: install node_modules
+cd ../web
 pnpm install
-pnpm dev
-
-# Open http://localhost:5173 in your browser.
 ```
+
+Then edit `api/.env` and fill in your LLM credentials. Two options:
+
+- **Option A (explicit):** keep `LLM_BASE_URL` + set `LLM_API_KEY` and `LLM_MODEL`. Default points at OpenAI.
+- **Option B (preset):** comment out Option A; uncomment Option B and pick a provider:
+
+  ```bash
+  LLM_PROVIDER=anthropic            # or: openai | deepseek | moonshot | qwen | glm | gemini | ...
+  LLM_API_KEY=sk-ant-...
+  LLM_MODEL=claude-sonnet-4-5
+  ```
+
+#### Daily startup (two terminals)
+
+**Terminal 1 — API on `:18080`**
+
+```bash
+cd api
+source .venv/bin/activate
+PYTHONPATH=.. ENGRAM_DEV=1 uvicorn app.main:app --reload --port 18080
+```
+
+Ready when you see `Application startup complete.`
+
+> **Why `PYTHONPATH=..`?** `shared/` lives at the repo root (one level up from `api/`); this puts it on Python's import path. Inside Docker the Dockerfile copies it in, so the env var isn't needed there.
+
+**Terminal 2 — Web on `:5173`**
+
+```bash
+cd web
+pnpm dev
+```
+
+Ready when you see `Local: http://localhost:5173/`.
+
+#### Open in browser
+
+http://localhost:5173
+
+#### Verify the pipe is wired up
+
+```bash
+curl http://localhost:5173/health     # via Vite proxy → FastAPI
+# → {"status":"ok"}
+```
+
+If that returns `ok`, the proxy and API are both fine. You can start capturing thoughts.
+
+#### Troubleshooting
+
+| Symptom | Likely cause / fix |
+|---|---|
+| `ModuleNotFoundError: No module named 'shared'` | `PYTHONPATH=..` missing, or running from wrong directory (must be `api/`). |
+| `/ui/api/stats` returns 404 in the browser | API isn't running on 18080, or it crashed — check Terminal 1. |
+| LLM call returns 401 / 403 | `api/.env` key missing or incorrect. |
+| White page / blank dashboard | Web dev server not running, or port 5173 occupied by another process. |
+| Capture is rejected with "intent gate" message | By design — Engram only stores reflections, not event logs. Phrase the entry as a thought, not a fact. |
+| Want to nuke local state and start fresh | `rm api/data/cognitive.db` and restart the API. |
 
 ### Local Docker smoke test (recommended before VPS deploy)
 

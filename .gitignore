@@ -3,19 +3,17 @@
 __pycache__/
 *.pyc
 .pytest_cache/
+
+# User data (DB, vector index, exports) — never commit
 data/
 
 # Environment
 .env
 *.env.local
 
-# Node
+# Node / Vite
 node_modules/
 dist/
-
-# Build artifacts
-cognitive-service/static/assets/
-cognitive-service/static/index.html
 
 # OS
 .DS_Store

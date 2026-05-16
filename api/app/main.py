@@ -2,15 +2,28 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import logging
+import os
 
 from fastapi import FastAPI
-from fastapi.staticfiles import StaticFiles
+from fastapi.middleware.cors import CORSMiddleware
 from app.lib.db import init_db
 from app.lib.config_loader import detect_orphan_domains
 from app.routes import agent, capture, import_entries, process_entry, query, revert_entry, ui_api
 
 app = FastAPI(title="Cognitive Service")
 logger = logging.getLogger("cognitive")
+
+
+# Local dev only: enable CORS for the Vite dev server on :5173.
+# In production, Caddy keeps web + api same-origin, so CORS is unnecessary.
+if os.getenv("ENGRAM_DEV") == "1":
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=["http://localhost:5173", "http://127.0.0.1:5173"],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
 
 @app.on_event("startup")
@@ -49,6 +62,3 @@ app.include_router(ui_api.router)
 @app.get("/health")
 async def health():
     return {"status": "ok"}
-
-
-app.mount("/", StaticFiles(directory="static", html=True), name="static")

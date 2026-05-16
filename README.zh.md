@@ -163,7 +163,7 @@ cd api
 python -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env  # 然后填入 LLM_BASE_URL / LLM_API_KEY / LLM_MODEL / EMBED_MODEL
-ENGRAM_DEV=1 uvicorn app.main:app --reload --port 18080
+PYTHONPATH=.. ENGRAM_DEV=1 uvicorn app.main:app --reload --port 18080
 
 # Terminal 2: Web（Vite 开发服务器，HMR）
 cd web

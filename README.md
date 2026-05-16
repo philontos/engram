@@ -204,7 +204,7 @@ See `deploy/Caddyfile.https.example` for the public-deployment template. WARNING
 
 ## Connect to your AI tool
 
-The MCP server is a thin stdio bridge. Your AI client spawns it as a subprocess on demand; it forwards tool calls over HTTP to the cognitive-service running on `localhost:18080`. Build it once, then point each client at the same `dist/index.js`.
+The MCP server is a thin stdio bridge. Your AI client spawns it as a subprocess on demand; it forwards tool calls over HTTP to the api service running on `localhost:18080`. Build it once, then point each client at the same `dist/index.js`.
 
 ### Build the MCP server
 
@@ -295,7 +295,7 @@ cd cognitive-openclaw
 
 ```
 engram/
-  cognitive-service/     # Core backend — FastAPI, SQLite, HNSWLIB
+  api/                   # Core backend — FastAPI, SQLite, HNSWLIB
     app/
       config/
         dimensions/      # Profile dimensions: OCEAN, Schwartz, facts
@@ -303,10 +303,12 @@ engram/
         backbones/       # Knowledge graph domains
       lib/               # Pipelines: slice, backbone, profile merge, query
       routes/            # HTTP API
-    frontend/            # Dashboard UI (React + Vite)
+    migrations/
+  web/                   # Frontend SPA — React, Vite, Tailwind
+  deploy/                # docker-compose + Caddyfile
+  shared/                # Shared LLM client
   cognitive-mcp/         # MCP server — Claude Code, Cursor, etc.
   cognitive-openclaw/    # OpenClaw plugin
-  shared/                # Shared LLM client
 ```
 
 ---
@@ -388,7 +390,7 @@ EMBED_MODEL=text-embedding-3-small
 
 ### Adding a dimension
 
-Create `cognitive-service/app/config/dimensions/my_dim/`:
+Create `api/app/config/dimensions/my_dim/`:
 
 ```
 my_dim/

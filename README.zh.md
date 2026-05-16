@@ -204,7 +204,7 @@ docker compose up -d --build
 
 ## 接入到你的 AI 工具
 
-MCP server 是一层薄薄的 stdio 桥接：AI 客户端按需把它 fork 为子进程，子进程再通过 HTTP 把工具调用转给跑在 `localhost:18080` 的 cognitive-service。构建一次，所有客户端都指向同一个 `dist/index.js`。
+MCP server 是一层薄薄的 stdio 桥接：AI 客户端按需把它 fork 为子进程，子进程再通过 HTTP 把工具调用转给跑在 `localhost:18080` 的 api service。构建一次，所有客户端都指向同一个 `dist/index.js`。
 
 ### 构建 MCP server
 
@@ -295,7 +295,7 @@ cd cognitive-openclaw
 
 ```
 engram/
-  cognitive-service/     # 核心后端 — FastAPI、SQLite、HNSWLIB
+  api/                   # 核心后端 — FastAPI、SQLite、HNSWLIB
     app/
       config/
         dimensions/      # 画像维度：OCEAN、Schwartz、facts
@@ -303,10 +303,12 @@ engram/
         backbones/       # 知识图谱域
       lib/               # 管线：slice / backbone / profile merge / query
       routes/            # HTTP API
-    frontend/            # Dashboard UI（React + Vite）
+    migrations/
+  web/                   # 前端 SPA — React、Vite、Tailwind
+  deploy/                # docker-compose + Caddyfile
+  shared/                # 共享 LLM 客户端
   cognitive-mcp/         # MCP 服务器 — Claude Code、Cursor 等
   cognitive-openclaw/    # OpenClaw 插件
-  shared/                # 共享 LLM 客户端
 ```
 
 ---
@@ -388,7 +390,7 @@ EMBED_MODEL=text-embedding-3-small
 
 ### 添加维度
 
-在 `cognitive-service/app/config/dimensions/my_dim/` 创建：
+在 `api/app/config/dimensions/my_dim/` 创建：
 
 ```
 my_dim/

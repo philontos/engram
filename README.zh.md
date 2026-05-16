@@ -155,25 +155,50 @@ technology     ●●●○○○
 
 ## 快速开始
 
+### 本地开发（不需要 Docker）
+
 ```bash
-git clone https://github.com/philontos/engram.git
-cd engram
+# Terminal 1: API（FastAPI + 热重载）
+cd api
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env  # 然后填入 LLM_BASE_URL / LLM_API_KEY / LLM_MODEL / EMBED_MODEL
+ENGRAM_DEV=1 uvicorn app.main:app --reload --port 18080
 
-# 配置 LLM API 密钥
-cp cognitive-service/.env.example cognitive-service/.env
-# 编辑 cognitive-service/.env：填写 LLM_BASE_URL、LLM_API_KEY、LLM_MODEL、EMBED_MODEL
-# （或者用 LLM_PROVIDER 选预设——见下面的 Configuration 章节）
+# Terminal 2: Web（Vite 开发服务器，HMR）
+cd web
+pnpm install
+pnpm dev
 
-# 构建 Dashboard 前端
-pnpm --prefix cognitive-service/frontend install
-pnpm --prefix cognitive-service/frontend run build
-
-# 启动服务
-docker compose up -d --build
+# 浏览器打开 http://localhost:5173
 ```
 
-服务启动在 `http://localhost:18080`。  
-Dashboard UI 在 `http://localhost:18080/`。
+### 本地 Docker 冒烟测试（推送 VPS 前推荐）
+
+```bash
+cd deploy
+docker compose up --build
+# 浏览器打开 http://localhost
+docker compose down  # 完事后停止
+```
+
+### VPS 部署（默认：Tailscale 私网模式）
+
+前置条件：VPS 已安装并启用 Tailscale，本地设备加入同一 Tailnet，VPS 防火墙不开放公网 80 端口。
+
+```bash
+ssh <vps>
+git clone <this-repo> ~/engram
+cd ~/engram
+cp api/.env.example api/.env  # 填入凭据
+cd deploy
+docker compose up -d --build
+# 从任意 Tailscale 设备访问：http://<vps-tailscale-ip>
+```
+
+### VPS 部署（公网 HTTPS）
+
+参考 `deploy/Caddyfile.https.example` 公网部署模板。**警告**：v1 没有内置认证，对外暴露前请在前面挂一层（如 basic-auth / OIDC 代理）。
 
 ---
 

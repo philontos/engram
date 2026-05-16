@@ -155,25 +155,50 @@ Every entry contributes signals. Your profile evolves. The graph grows denser. O
 
 ## Quick start
 
+### Local development (no Docker required)
+
 ```bash
-git clone https://github.com/philontos/engram.git
-cd engram
+# Terminal 1: API (FastAPI + hot reload)
+cd api
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env  # then fill in LLM_BASE_URL / LLM_API_KEY / LLM_MODEL / EMBED_MODEL
+ENGRAM_DEV=1 uvicorn app.main:app --reload --port 18080
 
-# Configure your LLM API key
-cp cognitive-service/.env.example cognitive-service/.env
-# Edit cognitive-service/.env: set LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, EMBED_MODEL
-# (or pick a preset via LLM_PROVIDER — see Configuration below)
+# Terminal 2: Web (Vite dev server with HMR)
+cd web
+pnpm install
+pnpm dev
 
-# Build the dashboard UI
-pnpm --prefix cognitive-service/frontend install
-pnpm --prefix cognitive-service/frontend run build
-
-# Start the service
-docker compose up -d --build
+# Open http://localhost:5173 in your browser.
 ```
 
-The cognitive service starts at `http://localhost:18080`.  
-The dashboard UI is at `http://localhost:18080/`.
+### Local Docker smoke test (recommended before VPS deploy)
+
+```bash
+cd deploy
+docker compose up --build
+# Open http://localhost in your browser.
+docker compose down  # when done
+```
+
+### VPS deployment (Tailscale-private, default)
+
+Prerequisites: Tailscale installed and running on the VPS, your laptop in the same Tailnet, VPS firewall blocks public access on :80.
+
+```bash
+ssh <vps>
+git clone <this-repo> ~/engram
+cd ~/engram
+cp api/.env.example api/.env  # fill in
+cd deploy
+docker compose up -d --build
+# Access from any Tailscale device: http://<vps-tailscale-ip>
+```
+
+### VPS deployment (Public HTTPS)
+
+See `deploy/Caddyfile.https.example` for the public-deployment template. WARNING: there is no built-in auth in v1; add a layer in front before exposing publicly.
 
 ---
 

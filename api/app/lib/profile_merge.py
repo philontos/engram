@@ -24,7 +24,7 @@
 
 facts / key_value 等无 score 字段的子维度走覆盖逻辑（直接取新值）。
 
-详细推导、参数物理含义、收敛仿真见 cognitive-service/README.md "Profile Merge"。
+详细推导、参数物理含义、收敛仿真见 api/README.md "Profile Merge"。
 """
 
 import json

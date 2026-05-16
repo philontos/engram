@@ -1194,7 +1194,7 @@ def _update_node_strength(node_id: int, new_conf: float, entry_id: int, origin: 
     的产品语义。strength 不再被锁死在 [0, 1]，而是反映累积关注度（典型 0-5）。
     上限可选：NODE_STRENGTH.cap 设为 None 不限，或浮点数硬截断。
 
-    详细推导见 cognitive-service/README.md "节点 Strength 衰减"。
+    详细推导见 api/README.md "节点 Strength 衰减"。
     """
     with get_conn() as conn:
         row = conn.execute(

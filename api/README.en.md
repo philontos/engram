@@ -1,4 +1,4 @@
-# cognitive-service
+# Engram API
 
 **English** · [中文](README.md)
 
@@ -178,7 +178,7 @@ python3 -m scripts.manage_config dimension remove curiosity --force   # skip con
 Constraints:
 - `key` must match `[a-z][a-z0-9_]*`; written as the DB enum value.
 - After `add`, you still need to edit the prompt files (`node_extract.spt` / `extract.spt` / `rubric.md`) to replace `[DOMAIN NAME]` etc. placeholders with real content.
-- All operations are filesystem-only; **restart the cognitive-service for changes to take effect** (the loader does a one-shot module-level load at startup).
+- All operations are filesystem-only; **restart the Engram API for changes to take effect** (the loader does a one-shot module-level load at startup).
 
 ---
 
@@ -240,12 +240,12 @@ See the full provider matrix in the root [README.md](../README.md#configuration)
 ## Running
 
 ```bash
-# Local dev (run directly; data lands in cognitive-service/data/)
-cd cognitive-service
+# Local dev (run directly; data lands in ../data/cognitive/)
+cd api
 PYTHONPATH=.. uvicorn app.main:app --reload --port 18080
 
 # Docker (recommended; data lands in repo-root data/cognitive/)
-docker compose up cognitive
+cd deploy && docker compose up api
 ```
 
 ---

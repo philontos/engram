@@ -93,7 +93,7 @@ async def _trigger_process(entry_id: int) -> None:
 @router.post("/capture", response_model=CaptureResponse)
 async def capture(req: CaptureRequest):
     if req.type != "text":
-        raise HTTPException(status_code=400, detail="cognitive-service is text-only.")
+        raise HTTPException(status_code=400, detail="Engram API is text-only.")
 
     content = req.content.strip()
     if not content:

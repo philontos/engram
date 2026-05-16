@@ -6,7 +6,7 @@ BACKBONE = {
     "description": "Brief description of this knowledge domain and what kinds of nodes it covers.",
     # Note: color is NOT a backbone concern — it's owned entirely by the
     # frontend (Morandi palette, theme-aware, deterministic by sorted key).
-    # If you want to customize the palette, edit `frontend/src/lib/theme.ts`.
+    # If you want to customize the palette, edit `web/src/lib/theme.ts`.
 
     # --- activation hints (injected into the shared activation prompt) ---
     # tell the LLM when this domain is worth activating for a given entry

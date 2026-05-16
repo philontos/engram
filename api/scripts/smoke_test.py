@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Smoke test for cognitive-service endpoints.
+"""Smoke test for Engram API endpoints.
 
 Usage:
   python3 scripts/smoke_test.py

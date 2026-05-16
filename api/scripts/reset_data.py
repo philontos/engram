@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Reset cognitive-service data during testing."""
+"""Reset Engram API data during testing."""
 
 from __future__ import annotations
 
@@ -100,7 +100,7 @@ def confirm(scope: str) -> None:
 
 
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Reset cognitive-service data by scope")
+    parser = argparse.ArgumentParser(description="Reset Engram API data by scope")
     parser.add_argument(
         "--scope",
         choices=["all", "derived", "vectors"],

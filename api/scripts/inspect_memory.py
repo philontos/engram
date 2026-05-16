@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Inspect cognitive-service SQLite data.
+"""Inspect Engram API SQLite data.
 
 Examples:
   python3 scripts/inspect_memory.py overview
@@ -254,7 +254,7 @@ def cmd_graph(args: argparse.Namespace) -> None:
 # ---------------------------------------------------------------------------
 
 def build_parser() -> argparse.ArgumentParser:
-    p = argparse.ArgumentParser(description="Inspect cognitive-service SQLite data")
+    p = argparse.ArgumentParser(description="Inspect Engram API SQLite data")
     sub = p.add_subparsers(dest="command", required=True)
 
     sub.add_parser("overview", help="Table counts + domain breakdown").set_defaults(func=cmd_overview)

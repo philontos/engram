@@ -163,7 +163,7 @@ def cmd_add(kind: str, key: str, name: str | None) -> int:
         print(f"  2. Edit  {target / 'node_extract.spt'}  (replace [DOMAIN NAME] placeholders)")
     else:
         print(f"  2. Edit  {target / 'extract.spt'}  and  {target / 'rubric.md'}")
-    print("  3. Restart the cognitive-service for the new config to take effect.")
+    print("  3. Restart the Engram API for the new config to take effect.")
     return 0
 
 
@@ -225,7 +225,7 @@ def cmd_toggle(kind: str, key: str, enable: bool) -> int:
     state = "enabled" if enable else "disabled"
     if changed:
         print(f"{kind} '{key}' {state}.")
-        print("Restart the cognitive-service for the change to take effect.")
+        print("Restart the Engram API for the change to take effect.")
         return 0
     print(f"{kind} '{key}' is already {state} (no change).")
     return 0

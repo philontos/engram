@@ -1,4 +1,4 @@
-# cognitive-service
+# Engram API
 
 [English](README.en.md) · **中文**
 
@@ -260,7 +260,7 @@ python3 -m scripts.manage_config dimension remove curiosity --force   # 跳过�
 约束：
 - `key` 必须 `[a-z][a-z0-9_]*`，会作为 DB enum 写入。
 - `add` 后仍需手工编辑 prompt 文件（`node_extract.spt` / `extract.spt` / `rubric.md`），把 `[DOMAIN NAME]` 等占位替换成实际域内容。
-- 所有操作仅改文件系统，**改完需要重启 cognitive-service 才会生效**（loader 启动时一次性装载）。
+- 所有操作仅改文件系统，**改完需要重启 Engram API 才会生效**（loader 启动时一次性装载）。
 
 ---
 
@@ -322,12 +322,12 @@ LLM_API_KEY=...
 ## 启动
 
 ```bash
-# 本地开发（直接跑，数据在 cognitive-service/data/）
-cd cognitive-service
+# 本地开发（直接跑，数据在 ../data/cognitive/）
+cd api
 PYTHONPATH=.. uvicorn app.main:app --reload --port 18080
 
 # Docker（推荐，数据在根目录 data/cognitive/）
-docker compose up cognitive
+cd deploy && docker compose up api
 ```
 
 ---

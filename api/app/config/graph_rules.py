@@ -22,7 +22,7 @@ EDGE_SOURCES = ["llm", "algo"]
 # 与 PROFILE_MERGE 的贝叶斯递推不同：strength 不是估计稳态隐变量，而是反映
 # "近期反复出现"的动态关注度。所以不要求收敛，反而需要持续响应新激活。
 #
-# 详细推导见 cognitive-service/README.md "节点 Strength 衰减"。
+# 详细推导见 api/README.md "节点 Strength 衰减"。
 NODE_STRENGTH = {
     "lambda": 0.01,  # 时间衰减系数，半衰期约 69 天（与 EDGE_DECAY 区分；后者更慢）
     "cap":    None,  # 可选硬上限。None 表示不截断（exp 衰减天然防 runaway）；
@@ -92,7 +92,7 @@ PROFILE_MERGE = {
     #
     # 数学保证：稳态 τ → E[c²] / (1−γ)，α 也随之有界，画像追踪能力不会随
     # 使用时间衰减；θ 不变时 μ 收敛到 E[x]，θ 慢漂移时 μ 在约 1/(1−γ) 条
-    # entry 内追上变化。详细推导见 cognitive-service/README.md "Profile Merge"。
+    # entry 内追上变化。详细推导见 api/README.md "Profile Merge"。
     "gamma":     0.98,    # 遗忘因子。等价于"画像每年漂移 ~5 分"的卡尔曼先验。
                           #   1.00 = 永不遗忘（纯贝叶斯，假设画像绝对不变）
                           #   0.98 = 半衰期 ~34 条 entry，稳态有效样本 ~50

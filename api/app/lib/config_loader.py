@@ -68,7 +68,7 @@ def _load_entry_analyzers() -> tuple[list[dict], dict[str, dict]]:
 # Color is a presentation concern — owned by the frontend. The backend
 # exposes only the knowledge model (key, name, description, focus hints).
 # The UI computes a deterministic, theme-aware Morandi color from the key
-# ordering at render time. See `frontend/src/lib/theme.ts` (`useDomainColor`).
+# ordering at render time. See `web/src/lib/theme.ts` (`useDomainColor`).
 # --------------------------------------------------------------------------
 
 

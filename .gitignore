@@ -20,6 +20,9 @@ cognitive-service/static/index.html
 # OS
 .DS_Store
 
+# Git worktrees
+.worktrees/
+
 # Personal exports & seed data (contain raw reflections — never commit)
 cognitive_entries*.json
 seed-reflections*.json

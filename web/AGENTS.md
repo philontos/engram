@@ -1,6 +1,6 @@
 # Frontend i18n contract
 
-This file is the authoritative i18n rulebook for `cognitive-service/frontend/`. Read it before adding, changing, or deleting any user-visible text.
+This file is the authoritative i18n rulebook for `web/`. Read it before adding, changing, or deleting any user-visible text.
 
 ## TL;DR
 
@@ -57,21 +57,21 @@ This file is the authoritative i18n rulebook for `cognitive-service/frontend/`. 
 
 ## Backend strings
 
-The backend (`cognitive-service/app/`) is allowed to contain Chinese **only** in comments and docstrings. User-visible API responses (errors, messages, prompt section headers) must be English; LLM outputs match the user's language by instruction. See root `AGENTS.md` for canonical-English-enum rules.
+The backend (`api/`) is allowed to contain Chinese **only** in comments and docstrings. User-visible API responses (errors, messages, prompt section headers) must be English; LLM outputs match the user's language by instruction. See root `AGENTS.md` for canonical-English-enum rules.
 
 ## Verifying your work
 
 Before committing a change touching components or i18n dicts:
 
 ```bash
-cd cognitive-service/frontend
+cd web
 npx tsc --noEmit       # catches missing keys, prop type mismatches
 ```
 
 A green `tsc` is necessary but not sufficient — `tsc` cannot catch a string you wrote in JSX bypassing `t()`. Manually grep your diff:
 
 ```bash
-# from cognitive-service/frontend
+# from web/
 git diff --unified=0 src/components/ | grep -P '^\+' | grep -P '[\x{4e00}-\x{9fff}]'
 ```
 

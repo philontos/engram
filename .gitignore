@@ -27,3 +27,6 @@ dist/
 # Personal exports & seed data (contain raw reflections — never commit)
 cognitive_entries*.json
 seed-reflections*.json
+
+# autonomous harness — cycle worktrees
+.harness-worktrees/

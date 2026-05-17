@@ -321,57 +321,62 @@ export function EntriesTab() {
           <>
             {/* Header strip: entry meta + raw + export actions */}
             <div style={{ padding: '20px 28px 12px', borderBottom: '1px solid var(--border)' }}>
-              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
-                <span className="badge" style={{ background: 'var(--engram-tint-primary)', color: 'var(--accent2)' }}>
-                  Entry #{detail.entry.id}
-                </span>
-                <div style={{ display: 'flex', gap: 6 }}>
-                  <button
-                    onClick={() => exportEntryTrace(effectiveSelectedId).catch(e => alert(t('entries.export_failed', { error: e.message ?? e })))}
-                    title={t('entries.export_one_title')}
-                    style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--border2)', background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>
-                    {t('entries.export_one')}
-                  </button>
-                  <button
-                    onClick={() => exportAllTraces().catch(e => alert(t('entries.export_failed', { error: e.message ?? e })))}
-                    title={t('entries.export_all_title')}
-                    style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--border2)', background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>
-                    {t('entries.export_all')}
-                  </button>
+              <div style={{ maxWidth: 1200, margin: '0 auto' }}>
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+                  <span className="badge" style={{ background: 'var(--engram-tint-primary)', color: 'var(--accent2)' }}>
+                    Entry #{detail.entry.id}
+                  </span>
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button
+                      onClick={() => exportEntryTrace(effectiveSelectedId).catch(e => alert(t('entries.export_failed', { error: e.message ?? e })))}
+                      title={t('entries.export_one_title')}
+                      style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--border2)', background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>
+                      {t('entries.export_one')}
+                    </button>
+                    <button
+                      onClick={() => exportAllTraces().catch(e => alert(t('entries.export_failed', { error: e.message ?? e })))}
+                      title={t('entries.export_all_title')}
+                      style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--border2)', background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>
+                      {t('entries.export_all')}
+                    </button>
+                  </div>
                 </div>
-              </div>
-              <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.7, marginBottom: 8 }}>{detail.entry.raw}</div>
-              <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text3)', alignItems: 'center' }}>
-                <span>{fmtTime(detail.entry.created_at)}</span>
-                <StatusBadge status={detail.entry.processing_status} />
-              </div>
-              {detail.entry.situation && (
-                <div style={{ marginTop: 10 }}>
-                  <SituationBadges sit={detail.entry.situation} />
+                <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.7, marginBottom: 8 }}>{detail.entry.raw}</div>
+                <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text3)', alignItems: 'center' }}>
+                  <span>{fmtTime(detail.entry.created_at)}</span>
+                  <StatusBadge status={detail.entry.processing_status} />
                 </div>
-              )}
+                {detail.entry.situation && (
+                  <div style={{ marginTop: 10 }}>
+                    <SituationBadges sit={detail.entry.situation} />
+                  </div>
+                )}
+              </div>
             </div>
 
             {/* Tab nav */}
             <div style={{ display: 'flex', gap: 0, padding: '0 28px', borderBottom: '1px solid var(--border)' }}>
-              <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')}>
-                {t('entries.tab_overview')}
-              </TabButton>
-              <TabButton active={activeTab === 'pipeline'} onClick={() => setActiveTab('pipeline')}>
-                {t('entries.tab_pipeline')}
-                {isLive && !processDone && (
-                  <span style={{
-                    marginLeft: 6, width: 6, height: 6, borderRadius: '50%',
-                    background: 'var(--engram-accent-primary, #8a7aa6)',
-                    display: 'inline-block',
-                    animation: 'pulse 1.2s ease-in-out infinite',
-                  }} />
-                )}
-              </TabButton>
+              <div style={{ maxWidth: 1200, margin: '0 auto', width: '100%', display: 'flex' }}>
+                <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')}>
+                  {t('entries.tab_overview')}
+                </TabButton>
+                <TabButton active={activeTab === 'pipeline'} onClick={() => setActiveTab('pipeline')}>
+                  {t('entries.tab_pipeline')}
+                  {isLive && !processDone && (
+                    <span style={{
+                      marginLeft: 6, width: 6, height: 6, borderRadius: '50%',
+                      background: 'var(--engram-accent-primary, #8a7aa6)',
+                      display: 'inline-block',
+                      animation: 'pulse 1.2s ease-in-out infinite',
+                    }} />
+                  )}
+                </TabButton>
+              </div>
             </div>
 
-            {/* Tab content */}
-            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 28px 28px', maxWidth: 860 }}>
+            {/* Tab content — fills the right pane; wide-screen 居中 + 留 margin */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 28px 28px' }}>
+              <div style={{ maxWidth: 1200, margin: '0 auto' }}>
               {activeTab === 'overview' && (
                 <>
                   {!traceData && <div style={{ color: 'var(--text3)', fontSize: 12, padding: 8 }}>{t('entries.loading')}</div>}
@@ -387,6 +392,7 @@ export function EntriesTab() {
                   mode={isLive ? 'live' : 'replay'}
                 />
               )}
+              </div>
             </div>
           </>
         )}

@@ -215,13 +215,6 @@ const dict = {
     revert:                '撤销',
     select_one:            '选择一条记忆查看详情',
     write_failed:          '写入失败: {error}',
-    process_running:           '处理中…',
-    process_done:              '完成 · {ms}ms',
-    process_failed:            '处理失败',
-    process_stage_slice:       '切片与画像',
-    process_stage_backbone:    '生长图谱',
-    process_slice_detail:      '{n} 个特征',
-    process_backbone_detail:   '+{nodes}节点 / +{edges}边',
     process: {
       header_done:             '完成 · {ms}ms · {calls} 次 LLM 调用',
       header_running:          '处理中… · 已完成 {calls}',

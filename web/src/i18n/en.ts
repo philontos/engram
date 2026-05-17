@@ -212,13 +212,6 @@ const dict: Dict = {
     revert:                'Revert',
     select_one:            'Select an entry to see details',
     write_failed:          'Save failed: {error}',
-    process_running:           'Processing…',
-    process_done:              'Done · {ms}ms',
-    process_failed:            'Failed',
-    process_stage_slice:       'Slice & profile',
-    process_stage_backbone:    'Grow graph',
-    process_slice_detail:      '{n} features',
-    process_backbone_detail:   '+{nodes}n / +{edges}e',
     process: {
       header_done:             'Done · {ms}ms · {calls} LLM calls',
       header_running:          'Processing… · {calls} done',

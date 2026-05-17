@@ -12,6 +12,7 @@ import type { DimensionSchema } from '@/types'
 import { fmtTime } from '@/lib/utils'
 import { RefreshCw, Search, Trash2, ChevronRight, RotateCcw, Play } from 'lucide-react'
 import { useConfirm } from '@/components/ui/ConfirmDialog'
+import { PipelineInspector } from './pipeline/PipelineInspector'
 
 type ProcessEvent = {
   type: string; stage?: string; status?: string; elapsed_ms?: number;
@@ -213,7 +214,7 @@ export function EntriesTab() {
             {capturing ? t('entries.storing') : t('entries.store')}
           </button>
           {processEntryId !== null && (
-            <ProcessPanel entryId={processEntryId} events={processEvents} done={processDone} />
+            <PipelineInspector entryId={processEntryId} events={processEvents as any} done={processDone} mode="live" />
           )}
         </div>
 
@@ -875,81 +876,3 @@ function DbDiffContent({ diff }: { diff: NonNullable<TraceData['trace']>['db_dif
   )
 }
 
-function ProcessPanel({ entryId, events, done }: { entryId: number; events: ProcessEvent[]; done: boolean }) {
-  const { t } = useI18n()
-  const stageEvents = events.filter(e => e.type === 'stage')
-  const stages: { key: string; label: string; status: 'pending' | 'running' | 'done' | 'error' | 'skipped'; detail?: string }[] = []
-
-  function pushStage(key: string, label: string) {
-    const start = stageEvents.find(e => e.stage === key && e.status === 'start')
-    const end = stageEvents.find(e => e.stage === key && (e.status === 'done' || e.status === 'error' || e.status === 'skipped'))
-    if (!start && !end) return
-    let status: 'pending' | 'running' | 'done' | 'error' | 'skipped' = 'running'
-    let detail: string | undefined
-    if (end?.status === 'done') {
-      status = 'done'
-      if (key === 'slice' && end.feature_count != null) detail = t('entries.process_slice_detail', { n: end.feature_count })
-      else if (key === 'backbone') {
-        const nodes = end.nodes_upserted ?? 0
-        const edges = end.edges_upserted ?? 0
-        detail = t('entries.process_backbone_detail', { nodes, edges })
-      }
-    } else if (end?.status === 'error') {
-      status = 'error'; detail = end.message
-    } else if (end?.status === 'skipped') {
-      status = 'skipped'
-    }
-    stages.push({ key, label, status, detail })
-  }
-
-  pushStage('slice',    t('entries.process_stage_slice'))
-  pushStage('backbone', t('entries.process_stage_backbone'))
-
-  const errEvent = stageEvents.find(e => e.stage === 'pipeline' && e.status === 'error')
-  const doneEvent = stageEvents.find(e => e.stage === 'pipeline' && e.status === 'done')
-
-  return (
-    <div style={{
-      marginTop: 8, padding: '8px 10px', fontSize: 11, lineHeight: 1.55,
-      color: 'var(--text2)', background: 'var(--surface2)',
-      border: '1px solid var(--border)', borderRadius: 6,
-      transition: 'opacity 0.4s', opacity: done ? 0.85 : 1,
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 }}>
-        <span style={{ fontWeight: 600, color: 'var(--text)' }}>
-          {done ? (errEvent ? t('entries.process_failed') : t('entries.process_done', { ms: doneEvent?.duration_ms ?? 0 }))
-                : t('entries.process_running')}
-        </span>
-        <span style={{ fontSize: 10, color: 'var(--text3)' }}>#{entryId}</span>
-      </div>
-      {stages.map(s => (
-        <div key={s.key} style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '2px 0' }}>
-          <StageDot status={s.status} />
-          <span style={{ flex: 1 }}>{s.label}</span>
-          {s.detail && <span style={{ fontSize: 10, color: 'var(--text3)' }}>{s.detail}</span>}
-        </div>
-      ))}
-      {errEvent?.message && (
-        <div style={{ marginTop: 4, color: 'var(--engram-accent-warning)', fontSize: 10 }}>
-          {errEvent.message}
-        </div>
-      )}
-    </div>
-  )
-}
-
-function StageDot({ status }: { status: 'pending' | 'running' | 'done' | 'error' | 'skipped' }) {
-  const color =
-    status === 'done'    ? 'var(--engram-accent-success, #6b8e6b)' :
-    status === 'error'   ? 'var(--engram-accent-warning, #b96a52)' :
-    status === 'skipped' ? 'var(--text3)' :
-    status === 'running' ? 'var(--engram-accent-primary, #8a7aa6)' :
-                            'var(--border2)'
-  const animated = status === 'running'
-  return (
-    <span style={{
-      width: 7, height: 7, borderRadius: '50%', background: color, flexShrink: 0,
-      animation: animated ? 'pulse 1.2s ease-in-out infinite' : 'none',
-    }} />
-  )
-}

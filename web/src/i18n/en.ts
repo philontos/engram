@@ -213,6 +213,7 @@ const dict: Dict = {
     select_one:            'Select an entry to see details',
     write_failed:          'Save failed: {error}',
     process: {
+      section_title:           'Pipeline trace',
       header_done:             'Done · {ms}ms · {calls} LLM calls',
       header_running:          'Processing… · {calls} done',
       header_failed:           'Process failed',

@@ -95,6 +95,7 @@ export function EntriesTab() {
     const ac = new AbortController()
     processAbortRef.current = ac
     setProcessEntryId(entryId); setProcessEvents([]); setProcessDone(false)
+    setSelectedId(entryId)  // auto-focus right pane so the inspector is visible there
     try {
       if (triggerFirst) {
         const startRes = await fetch(`/entries/${entryId}/process/start`, {
@@ -213,9 +214,6 @@ export function EntriesTab() {
           <button onClick={handleCapture} disabled={capturing || !captureText.trim()} className="btn btn-primary" style={{ width: '100%', fontSize: 12 }}>
             {capturing ? t('entries.storing') : t('entries.store')}
           </button>
-          {processEntryId !== null && (
-            <PipelineInspector entryId={processEntryId} events={processEvents as any} done={processDone} mode="live" />
-          )}
         </div>
 
         {/* Header */}
@@ -311,6 +309,17 @@ export function EntriesTab() {
         {effectiveSelectedId && detail && (
           <EntryDetailPanel detail={detail} onTrace={() => setTraceId(effectiveSelectedId)} />
         )}
+        {/* Pipeline inspector — live mode if this entry is currently being
+            processed; replay mode if it's already processed. */}
+        {effectiveSelectedId && (
+          <PipelineInspectorSection
+            entryId={effectiveSelectedId}
+            isLive={effectiveSelectedId === processEntryId}
+            liveEvents={processEvents as any}
+            liveDone={processDone}
+            detail={detail}
+          />
+        )}
       </div>
 
       {/* Trace Modal */}
@@ -343,6 +352,46 @@ function StatusBadge({ status }: { status: string }) {
       )}
       {s.label}
     </span>
+  )
+}
+
+/**
+ * 右侧详情区域底部的 Pipeline 链路面板。
+ *
+ * - isLive=true 时（当前 entry 正在处理）：直接用累积的 SSE event 实时渲染
+ * - 否则：仅当 entry 已 processed 时进入 replay 模式，hook 自动拉 /trace
+ * - captured / failed / reverted 等中间态：不渲染（没东西可看）
+ */
+function PipelineInspectorSection({
+  entryId,
+  isLive,
+  liveEvents,
+  liveDone,
+  detail,
+}: {
+  entryId: number
+  isLive: boolean
+  liveEvents: any[]
+  liveDone: boolean
+  detail: EntryDetail | undefined
+}) {
+  const { t } = useI18n()
+  const isProcessed = detail?.entry.processing_status === 'processed'
+
+  if (!isLive && !isProcessed) return null
+
+  return (
+    <div style={{ padding: '0 28px 32px', maxWidth: 720 }}>
+      <div className="t-caption" style={{ marginBottom: 8 }}>
+        {t('entries.process.section_title')}
+      </div>
+      <PipelineInspector
+        entryId={entryId}
+        events={isLive ? liveEvents : undefined}
+        done={isLive ? liveDone : true}
+        mode={isLive ? 'live' : 'replay'}
+      />
+    </div>
   )
 }
 

@@ -216,6 +216,7 @@ const dict = {
     select_one:            '选择一条记忆查看详情',
     write_failed:          '写入失败: {error}',
     process: {
+      section_title:           '处理链路',
       header_done:             '完成 · {ms}ms · {calls} 次 LLM 调用',
       header_running:          '处理中… · 已完成 {calls}',
       header_failed:           '处理失败',

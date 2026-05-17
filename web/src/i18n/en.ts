@@ -212,6 +212,8 @@ const dict: Dict = {
     revert:                'Revert',
     select_one:            'Select an entry to see details',
     write_failed:          'Save failed: {error}',
+    tab_overview:              'Overview',
+    tab_pipeline:              'Pipeline trace',
     process: {
       section_title:           'Pipeline trace',
       header_done:             'Done · {ms}ms · {calls} LLM calls',

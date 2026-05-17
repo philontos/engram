@@ -2,7 +2,7 @@ import { useState, useRef, useEffect } from 'react'
 import { createPortal } from 'react-dom'
 import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { fetchEntries, fetchEntry, fetchEntryTrace, deleteEntry, revertEntry, exportEntryTrace, exportAllTraces } from '@/api'
-import type { EntryDetail, TraceData, SliceFeature, SituationContext } from '@/types'
+import type { TraceData, SituationContext } from '@/types'
 import { SCHWARTZ_COLORS, getDomainLabel } from '@/lib/constants'
 import { useDomainColor } from '@/lib/theme'
 import { useDimensionSchemas, getDimSchema } from '@/lib/useDimensionSchemas'
@@ -10,9 +10,10 @@ import { useBackbones } from '@/lib/useBackbones'
 import { useI18n } from '@/i18n'
 import type { DimensionSchema } from '@/types'
 import { fmtTime } from '@/lib/utils'
-import { RefreshCw, Search, Trash2, ChevronRight, RotateCcw, Play } from 'lucide-react'
+import { RefreshCw, Trash2, ChevronRight, RotateCcw, Play } from 'lucide-react'
 import { useConfirm } from '@/components/ui/ConfirmDialog'
 import { PipelineInspector } from './pipeline/PipelineInspector'
+import type { StageEvent } from './pipeline/types'
 
 type ProcessEvent = {
   type: string; stage?: string; status?: string; elapsed_ms?: number;
@@ -27,7 +28,7 @@ export function EntriesTab() {
   const { backbones } = useBackbones()
   const { lang, t } = useI18n()
   const [selectedId, setSelectedId]    = useState<number | null>(null)
-  const [traceId, setTraceId]          = useState<number | null>(null)
+  const [activeTab, setActiveTab]      = useState<'overview' | 'pipeline'>('overview')
   const [captureText, setCaptureText]  = useState('')
   const [capturing, setCapturing]      = useState(false)
   const [rejectHint, setRejectHint]    = useState<string>('')
@@ -50,9 +51,25 @@ export function EntriesTab() {
   const { data: detail } = useQuery({
     queryKey: ['entry', effectiveSelectedId], queryFn: () => fetchEntry(effectiveSelectedId!), enabled: effectiveSelectedId !== null,
   })
+  // Trace 跟当前选中 entry 绑定：只要选了 entry 就拉一次。后端对未处理的 entry
+  // 返回空 trace，UI 在 overview tab 里展示对应空态。
   const { data: traceData } = useQuery({
-    queryKey: ['trace', traceId], queryFn: () => fetchEntryTrace(traceId!), enabled: traceId !== null,
+    queryKey: ['trace', effectiveSelectedId],
+    queryFn: () => fetchEntryTrace(effectiveSelectedId!),
+    enabled: effectiveSelectedId !== null,
   })
+
+  // 当前选中的 entry 是否正在 live 处理流？
+  const isLive = effectiveSelectedId !== null && effectiveSelectedId === processEntryId
+
+  // 当 entry 切换时（不是 isLive 翻转时）重置 tab 默认值 —— 用 ref+derived-state 而不是
+  // useEffect，避免 react-hooks/set-state-in-effect 触发的额外 render 循环。
+  // 见 https://react.dev/learn/you-might-not-need-an-effect#adjusting-some-state-when-a-prop-changes
+  const lastEntryRef = useRef<number | null>(null)
+  if (effectiveSelectedId !== lastEntryRef.current) {
+    lastEntryRef.current = effectiveSelectedId
+    setActiveTab(isLive ? 'pipeline' : 'overview')
+  }
 
   useEffect(() => {
     const h = (e: KeyboardEvent) => {
@@ -266,12 +283,6 @@ export function EntriesTab() {
                           {processEntryId === e.id && !processDone ? t('entries.processing') : t('entries.process')}
                         </button>
                       )}
-                      {e.processing_status === 'processed' && (
-                        <button onClick={ev => { ev.stopPropagation(); setTraceId(e.id) }}
-                          style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '3px 9px', borderRadius: 6, border: '1px solid var(--engram-accent-primary)', cursor: 'pointer', background: 'var(--engram-tint-primary)', color: 'var(--accent2)', fontSize: 11 }}>
-                          <Search size={11} />Trace
-                        </button>
-                      )}
                       {e.can_revert && (
                         <button onClick={ev => handleRevert(e.id, e.newer_processed_count, ev)}
                           disabled={revertingIds.has(e.id)}
@@ -299,33 +310,87 @@ export function EntriesTab() {
       </div>
 
       {/* ── Right detail ── */}
-      <div style={{ flex: 1, overflowY: 'auto', minWidth: 0 }}>
+      <div style={{ flex: 1, overflowY: 'auto', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
         {!effectiveSelectedId && (
           <div style={{ height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text3)', gap: 8 }}>
             <ChevronRight size={28} strokeWidth={1.5} />
             <span style={{ fontSize: 13 }}>{t('entries.select_one')}</span>
           </div>
         )}
-        {effectiveSelectedId && detail && (
-          <EntryDetailPanel detail={detail} onTrace={() => setTraceId(effectiveSelectedId)} />
-        )}
-        {/* Pipeline inspector — live mode if this entry is currently being
-            processed; replay mode if it's already processed. */}
-        {effectiveSelectedId && (
-          <PipelineInspectorSection
-            entryId={effectiveSelectedId}
-            isLive={effectiveSelectedId === processEntryId}
-            liveEvents={processEvents as any}
-            liveDone={processDone}
-            detail={detail}
-          />
+        {effectiveSelectedId !== null && detail && (
+          <>
+            {/* Header strip: entry meta + raw + export actions */}
+            <div style={{ padding: '20px 28px 12px', borderBottom: '1px solid var(--border)' }}>
+              <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 12, marginBottom: 8 }}>
+                <span className="badge" style={{ background: 'var(--engram-tint-primary)', color: 'var(--accent2)' }}>
+                  Entry #{detail.entry.id}
+                </span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <button
+                    onClick={() => exportEntryTrace(effectiveSelectedId).catch(e => alert(t('entries.export_failed', { error: e.message ?? e })))}
+                    title={t('entries.export_one_title')}
+                    style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--border2)', background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>
+                    {t('entries.export_one')}
+                  </button>
+                  <button
+                    onClick={() => exportAllTraces().catch(e => alert(t('entries.export_failed', { error: e.message ?? e })))}
+                    title={t('entries.export_all_title')}
+                    style={{ fontSize: 11, padding: '3px 8px', borderRadius: 6, border: '1px solid var(--border2)', background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>
+                    {t('entries.export_all')}
+                  </button>
+                </div>
+              </div>
+              <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.7, marginBottom: 8 }}>{detail.entry.raw}</div>
+              <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text3)', alignItems: 'center' }}>
+                <span>{fmtTime(detail.entry.created_at)}</span>
+                <StatusBadge status={detail.entry.processing_status} />
+              </div>
+              {detail.entry.situation && (
+                <div style={{ marginTop: 10 }}>
+                  <SituationBadges sit={detail.entry.situation} />
+                </div>
+              )}
+            </div>
+
+            {/* Tab nav */}
+            <div style={{ display: 'flex', gap: 0, padding: '0 28px', borderBottom: '1px solid var(--border)' }}>
+              <TabButton active={activeTab === 'overview'} onClick={() => setActiveTab('overview')}>
+                {t('entries.tab_overview')}
+              </TabButton>
+              <TabButton active={activeTab === 'pipeline'} onClick={() => setActiveTab('pipeline')}>
+                {t('entries.tab_pipeline')}
+                {isLive && !processDone && (
+                  <span style={{
+                    marginLeft: 6, width: 6, height: 6, borderRadius: '50%',
+                    background: 'var(--engram-accent-primary, #8a7aa6)',
+                    display: 'inline-block',
+                    animation: 'pulse 1.2s ease-in-out infinite',
+                  }} />
+                )}
+              </TabButton>
+            </div>
+
+            {/* Tab content */}
+            <div style={{ flex: 1, overflowY: 'auto', padding: '16px 28px 28px', maxWidth: 860 }}>
+              {activeTab === 'overview' && (
+                <>
+                  {!traceData && <div style={{ color: 'var(--text3)', fontSize: 12, padding: 8 }}>{t('entries.loading')}</div>}
+                  {traceData && !traceData.trace && <div style={{ color: 'var(--text3)', fontSize: 12, padding: 8 }}>{t('entries.no_trace')}</div>}
+                  {traceData?.trace && <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}><TraceStages trace={traceData.trace} /></div>}
+                </>
+              )}
+              {activeTab === 'pipeline' && (
+                <PipelineInspector
+                  entryId={effectiveSelectedId}
+                  events={isLive ? (processEvents as unknown as StageEvent[]) : undefined}
+                  done={isLive ? processDone : true}
+                  mode={isLive ? 'live' : 'replay'}
+                />
+              )}
+            </div>
+          </>
         )}
       </div>
-
-      {/* Trace Modal */}
-      {traceId !== null && (
-        <TraceModal traceId={traceId} traceData={traceData} onClose={() => setTraceId(null)} />
-      )}
     </div>
   )
 }
@@ -355,111 +420,26 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
-/**
- * 右侧详情区域底部的 Pipeline 链路面板。
- *
- * - isLive=true 时（当前 entry 正在处理）：直接用累积的 SSE event 实时渲染
- * - 否则：仅当 entry 已 processed 时进入 replay 模式，hook 自动拉 /trace
- * - captured / failed / reverted 等中间态：不渲染（没东西可看）
- */
-function PipelineInspectorSection({
-  entryId,
-  isLive,
-  liveEvents,
-  liveDone,
-  detail,
-}: {
-  entryId: number
-  isLive: boolean
-  liveEvents: any[]
-  liveDone: boolean
-  detail: EntryDetail | undefined
-}) {
-  const { t } = useI18n()
-  const isProcessed = detail?.entry.processing_status === 'processed'
-
-  if (!isLive && !isProcessed) return null
-
+function TabButton({ active, onClick, children }: { active: boolean; onClick: () => void; children: React.ReactNode }) {
   return (
-    <div style={{ padding: '0 28px 32px', maxWidth: 720 }}>
-      <div className="t-caption" style={{ marginBottom: 8 }}>
-        {t('entries.process.section_title')}
-      </div>
-      <PipelineInspector
-        entryId={entryId}
-        events={isLive ? liveEvents : undefined}
-        done={isLive ? liveDone : true}
-        mode={isLive ? 'live' : 'replay'}
-      />
-    </div>
-  )
-}
-
-function EntryDetailPanel({ detail, onTrace }: { detail: EntryDetail; onTrace: () => void }) {
-  const schemas = useDimensionSchemas()
-  const { backbones } = useBackbones()
-  const colorOf = useDomainColor()
-  const { t, lang } = useI18n()
-  return (
-    <div style={{ padding: '24px 28px', maxWidth: 720 }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 20 }}>
-        <div>
-          <span className="badge" style={{ background: 'var(--engram-tint-primary)', color: 'var(--accent2)', marginBottom: 8, display: 'inline-flex' }}>
-            Entry #{detail.entry.id}
-          </span>
-          <div style={{ fontSize: 13, color: 'var(--text)', lineHeight: 1.7 }}>{detail.entry.raw}</div>
-          <div style={{ display: 'flex', gap: 12, marginTop: 8, fontSize: 11, color: 'var(--text3)' }}>
-            <span>{fmtTime(detail.entry.created_at)}</span>
-            <StatusBadge status={detail.entry.processing_status} />
-            {detail.entry.processing_status === 'processed' && (
-              <button onClick={onTrace} style={{ color: 'var(--accent2)', background: 'none', border: 'none', cursor: 'pointer', fontSize: 11, display: 'flex', alignItems: 'center', gap: 3 }}>
-                <Search size={11} /> {t('entries.view_trace')}
-              </button>
-            )}
-          </div>
-        </div>
-      </div>
-
-      {/* Situation */}
-      {detail.entry.situation && <SituationBadges sit={detail.entry.situation} />}
-
-      {/* Features */}
-      {detail.features.length > 0 && (
-        <div style={{ marginBottom: 24 }}>
-          <div className="t-caption" style={{ marginBottom: 12 }}>{t('entries.slice_analysis')}</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
-            {detail.features.map((f, i) => <FeatureBlock key={i} f={f} schemas={schemas} />)}
-          </div>
-        </div>
-      )}
-
-      {/* Activations */}
-      {detail.activations.length > 0 && (
-        <div>
-          <div className="t-caption" style={{ marginBottom: 12 }}>{t('entries.activation_nodes', { n: detail.activations.length })}</div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            {detail.activations.map((a, i) => {
-              const color = colorOf(a.domain, backbones)
-              return (
-                <div key={i} style={{ padding: '10px 14px', borderRadius: 8, background: 'var(--surface2)', border: '1px solid var(--border)' }}>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: a.user_relevance ? 4 : 0 }}>
-                    <span className="chip" style={{ background: color + '22', color }}>{getDomainLabel(a.domain, backbones, lang)}</span>
-                    <span style={{ fontWeight: 600, fontSize: 12, color: 'var(--text)' }}>{a.label}</span>
-                    <span style={{ fontSize: 11, color: 'var(--text3)' }}>{a.node_type}</span>
-                  </div>
-                  {a.user_relevance && <div style={{ fontSize: 11, color: 'var(--text3)', lineHeight: 1.5 }}>{a.user_relevance}</div>}
-                </div>
-              )
-            })}
-          </div>
-        </div>
-      )}
-
-      {detail.activations.length === 0 && detail.entry.processing_status !== 'processed' && (
-        <div style={{ color: 'var(--text3)', fontSize: 12 }}>{t('entries.not_processed')}</div>
-      )}
-    </div>
+    <button
+      onClick={onClick}
+      style={{
+        background: 'none',
+        border: 'none',
+        borderBottom: active ? '2px solid var(--accent)' : '2px solid transparent',
+        color: active ? 'var(--text)' : 'var(--text3)',
+        fontSize: 12,
+        fontWeight: active ? 600 : 500,
+        padding: '10px 14px',
+        cursor: 'pointer',
+        marginBottom: -1,
+        display: 'inline-flex',
+        alignItems: 'center',
+      }}
+    >
+      {children}
+    </button>
   )
 }
 
@@ -494,49 +474,6 @@ function ScoreBars({ schema, content, compact = false }: {
           </div>
         )
       })}
-    </div>
-  )
-}
-
-function FeatureBlock({ f, schemas }: { f: SliceFeature; schemas: DimensionSchema[] }) {
-  const c = f.content_json as Record<string, unknown>
-  const schema = getDimSchema(schemas, f.dimension)
-  const fmt = schema?.summary_format ?? 'free'
-  const label = schema?.summary_label ?? f.dimension
-
-  if (fmt === 'scores' && schema) {
-    return (
-      <div style={{ padding: '14px 16px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', marginBottom: 10 }}>{label}</div>
-        <ScoreBars schema={schema} content={c} />
-      </div>
-    )
-  }
-
-  if (fmt === 'key_value') {
-    const rows = Object.entries(c).filter(([, v]) => v && v !== 'null')
-    if (!rows.length) return null
-    return (
-      <div style={{ padding: '14px 16px', borderRadius: 10, background: 'var(--surface)', border: '1px solid var(--border)' }}>
-        <div style={{ fontSize: 11, fontWeight: 600, color: 'var(--text3)', marginBottom: 10 }}>{label}</div>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {rows.map(([k, v]) => {
-            const val = typeof v === 'object' && v !== null && 'value' in v ? String((v as Record<string, unknown>).value) : String(v)
-            return (
-              <div key={k} style={{ display: 'flex', gap: 12, fontSize: 12 }}>
-                <span style={{ color: 'var(--text3)', width: 64, flexShrink: 0 }}>{k}</span>
-                <span style={{ color: 'var(--text)' }}>{val}</span>
-              </div>
-            )
-          })}
-        </div>
-      </div>
-    )
-  }
-
-  return (
-    <div style={{ fontSize: 11, color: 'var(--text3)', padding: '8px 12px', borderRadius: 8, background: 'var(--surface)', border: '1px solid var(--border)' }}>
-      {label} · {JSON.stringify(c).substring(0, 120)}
     </div>
   )
 }
@@ -643,43 +580,6 @@ function FieldHint({ field }: { field: keyof typeof FIELD_HINT_KEYS }) {
         document.body
       )}
     </span>
-  )
-}
-
-function TraceModal({ traceId, traceData, onClose }: { traceId: number; traceData?: TraceData; onClose: () => void }) {
-  const { t } = useI18n()
-  return (
-    <div style={{ position: 'fixed', inset: 0, zIndex: 50, background: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'flex-start', justifyContent: 'center', padding: 32, overflowY: 'auto' }}
-      onClick={e => e.target === e.currentTarget && onClose()}>
-      <div className="fade-in" style={{ width: '100%', maxWidth: 860, flexShrink: 0, borderRadius: 14, overflow: 'hidden', background: 'var(--surface)', border: '1px solid var(--border2)' }}>
-        <div style={{ position: 'sticky', top: 0, display: 'flex', alignItems: 'center', padding: '16px 20px', background: 'var(--surface)', borderBottom: '1px solid var(--border)', zIndex: 2 }}>
-          <div>
-            <div style={{ fontSize: 14, fontWeight: 600, color: 'var(--text)' }}>Pipeline Trace — Entry #{traceId}</div>
-            {traceData?.updated_at && <div style={{ fontSize: 11, color: 'var(--text3)', marginTop: 2 }}>{t('entries.trace_run_at', { time: fmtTime(traceData.updated_at) })}</div>}
-          </div>
-          <div style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: 8 }}>
-            <button
-              onClick={() => exportEntryTrace(traceId).catch(e => alert(t('entries.export_failed', { error: e.message ?? e })))}
-              title={t('entries.export_one_title')}
-              style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border2)', background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>
-              {t('entries.export_one')}
-            </button>
-            <button
-              onClick={() => exportAllTraces().catch(e => alert(t('entries.export_failed', { error: e.message ?? e })))}
-              title={t('entries.export_all_title')}
-              style={{ fontSize: 12, padding: '4px 10px', borderRadius: 6, border: '1px solid var(--border2)', background: 'var(--surface2)', color: 'var(--text)', cursor: 'pointer' }}>
-              {t('entries.export_all')}
-            </button>
-            <button onClick={onClose} style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text3)', fontSize: 18, lineHeight: 1 }}>✕</button>
-          </div>
-        </div>
-        <div style={{ padding: '16px 20px', display: 'flex', flexDirection: 'column', gap: 10 }}>
-          {!traceData && <div style={{ color: 'var(--text3)', fontSize: 12, padding: 8 }}>{t('entries.loading')}</div>}
-          {traceData && !traceData.trace && <div style={{ color: 'var(--text3)', fontSize: 12, padding: 8 }}>{t('entries.no_trace')}</div>}
-          {traceData?.trace && <TraceStages trace={traceData.trace} />}
-        </div>
-      </div>
-    </div>
   )
 }
 

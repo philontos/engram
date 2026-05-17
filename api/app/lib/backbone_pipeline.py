@@ -17,6 +17,7 @@ import json
 import math
 from datetime import datetime, timezone
 from string import Template
+from typing import Callable
 
 import numpy as np
 
@@ -55,10 +56,13 @@ def _ts(dt: datetime | None) -> str:
 async def run_backbone_pipeline(
     entry_id: int, slice_id: int, raw: str, trace: dict | None = None,
     entry_dt: datetime | None = None,
+    emit: Callable[..., None] | None = None,
 ) -> dict:
-    """完整主干网管线，返回简单统计。trace 若传入则原地填充各阶段数据。"""
+    """完整主干网管线，返回简单统计。trace 若传入则原地填充各阶段数据。
+    emit（可选）：在 10 个子 stage 节点调用 emit(stage, status, **extra)。"""
     t = trace if trace is not None else {}
     entry_ts = _ts(entry_dt)
+    _emit = emit or (lambda *a, **kw: None)
 
     if not is_structured_llm_configured():
         return {"activated": [], "nodes_upserted": 0, "edges_upserted": 0, "rollback_nodes": [], "rollback_edges": []}
@@ -71,10 +75,15 @@ async def run_backbone_pipeline(
     if situation_ctx:
         slice_summary = f"{slice_summary}\n[Entry context: {situation_ctx}]"
 
-    # Stage 1: Activation
+    # ───────── Stage: activation ─────────
+    _emit("activation", "start")
     activations = await _activate_backbones(raw, slice_summary, profile_summary)
     t["activation"] = activations
+    _emit("activation", "done",
+          summary=_summarize_activations(activations),
+          payload=activations)
     if not activations:
+        _emit("backbone", "skipped", reason="no_activated_domains")
         return {"activated": [], "nodes_upserted": 0, "edges_upserted": 0, "rollback_nodes": [], "rollback_edges": []}
 
     # Rollback: 边的 pre-snapshot（在任何边写入之前）
@@ -84,7 +93,8 @@ async def run_backbone_pipeline(
         ).fetchall()
     _before_edges: dict[int, dict] = {r["id"]: dict(r) for r in _pre_edge_rows}
 
-    # Stage 2: 全域粗召回
+    # ───────── Stage: rough_retrieval ─────────
+    _emit("rough_retrieval", "start")
     raw_emb = await embed(raw)
     rough_nodes = _rough_retrieval(raw_emb, top_k=RETRIEVAL["rough_top_k"])
     t["rough_retrieval"] = [
@@ -93,8 +103,14 @@ async def run_backbone_pipeline(
          "sim": round(float(n.get("rough_sim", 0)), 4)}
         for n in rough_nodes
     ]
+    _avg_sim = (sum(float(n.get("rough_sim", 0)) for n in rough_nodes) / len(rough_nodes)) if rough_nodes else 0.0
+    _emit("rough_retrieval", "done",
+          summary=f"top-{len(rough_nodes)} candidates (avg sim {_avg_sim:.2f})",
+          payload={"candidates": t["rough_retrieval"][:15]})
 
-    # Stage 3a: 内源节点抽取（各域并发，只基于 raw_entry 显式表达）
+    # ───────── Stage: node_extract:<domain> (internal, per-domain parallel) ─────────
+    for _domain in activations:
+        _emit(f"node_extract:{_domain}", "start")
     internal_tasks = [
         _extract_internal_candidates(
             domain, effort, raw, slice_summary, profile_summary,
@@ -108,15 +124,21 @@ async def run_backbone_pipeline(
     for domain, r in zip(activations.keys(), internal_results):
         candidates = r if isinstance(r, list) else []
         internal_candidates.extend(candidates)
-        t["node_extract_internal"][domain] = [
+        _domain_payload = [
             {"label": c.get("label", ""), "node_type": c.get("node_type", ""),
              "confidence": round(float(c.get("confidence", 0)), 4),
              "description": c.get("description", ""),
              "user_relevance": c.get("user_relevance", "")}
             for c in candidates
         ]
+        t["node_extract_internal"][domain] = _domain_payload
+        _emit(f"node_extract:{domain}", "done",
+              summary=f"{len(candidates)} internal candidates",
+              payload={"candidates": _domain_payload})
 
-    # Stage 3b: 外源节点扩展（基于内源种子向外发散，各域并发）
+    # ───────── Stage: node_external:<domain> (external expansion) ─────────
+    for _domain in activations:
+        _emit(f"node_external:{_domain}", "start")
     external_tasks = [
         _extract_external_candidates(
             domain, effort, raw, slice_summary, profile_summary,
@@ -131,15 +153,20 @@ async def run_backbone_pipeline(
     for domain, r in zip(activations.keys(), external_results):
         candidates = r if isinstance(r, list) else []
         external_candidates.extend(candidates)
-        t["node_extract_external"][domain] = [
+        _domain_payload = [
             {"label": c.get("label", ""), "node_type": c.get("node_type", ""),
              "confidence": round(float(c.get("confidence", 0)), 4),
              "description": c.get("description", ""),
              "user_relevance": c.get("user_relevance", "")}
             for c in candidates
         ]
+        t["node_extract_external"][domain] = _domain_payload
+        _emit(f"node_external:{domain}", "done",
+              summary=f"{len(candidates)} external candidates",
+              payload={"candidates": _domain_payload})
 
-    # Stage 4: Node Resolution（内源优先，外源命中已有内源不降级）
+    # ───────── Stage: node_resolution ─────────
+    _emit("node_resolution", "start")
     all_candidates = internal_candidates + external_candidates
     confirmed, emb_cache, new_count, diff_nodes, node_rollback = await _resolve_nodes(
         all_candidates, rough_nodes, entry_id, entry_ts, entry_dt
@@ -158,6 +185,13 @@ async def run_backbone_pipeline(
     t["db_diff"]["nodes_updated"] = diff_nodes["updated"]
     t["db_diff"]["edges_new"] = []
     t["db_diff"]["edges_updated"] = []
+    _emit("node_resolution", "done",
+          summary=f"{new_count} new + {len(diff_nodes.get('updated', []))} updated, {len(confirmed)} confirmed",
+          payload={
+              "new": [{"label": n.get("label", ""), "domain": n.get("domain", "")} for n in diff_nodes.get("new", [])[:20]],
+              "updated": [{"label": n.get("label", ""), "domain": n.get("domain", "")} for n in diff_nodes.get("updated", [])[:20]],
+              "confirmed_count": len(confirmed),
+          })
 
     # Rollback: 记录 confirmed 节点写 activation 之前的 current_activation_id
     _confirmed_act_ids = [n["id"] for n in confirmed if n.get("id")]
@@ -175,7 +209,8 @@ async def run_backbone_pipeline(
     # Write backbone_activations（带情境上下文）
     _write_activations(entry_id, confirmed, entry_ts, situation_ctx)
 
-    # Stage 5: 精召回
+    # ───────── Stage: precise_retrieval ─────────
+    _emit("precise_retrieval", "start")
     subgraph = _precise_retrieval(confirmed)
     seed_meta = subgraph.get("seed_meta", {})
     t["subgraph"] = {
@@ -189,17 +224,26 @@ async def run_backbone_pipeline(
                    "weight": round(float(e.get("weight") or 0), 4)}
                   for e in subgraph["edges"]],
     }
+    _emit("precise_retrieval", "done",
+          summary=f"{len(subgraph['nodes'])} nodes / {len(subgraph['edges'])} edges in local subgraph",
+          payload={"nodes_count": len(subgraph["nodes"]), "edges_count": len(subgraph["edges"])})
 
-    # Stage 6a: 算法相似边（同域 + 跨域，不调 LLM）
+    # ───────── Stage: algo_edges ─────────
+    _emit("algo_edges", "start")
     algo_edges, algo_new, algo_updated = _write_algo_similarity_edges(confirmed, emb_cache, entry_id, entry_ts)
     t["algo_edges"] = algo_edges
     t["db_diff"]["edges_new"].extend(algo_new)
     t["db_diff"]["edges_updated"].extend(algo_updated)
+    _emit("algo_edges", "done",
+          summary=f"{len(algo_edges)} similarity edges",
+          payload={"edges": [{"from": e.get("from_label", ""), "to": e.get("to_label", ""),
+                              "relation_type": e.get("relation_type", "")} for e in algo_edges[:20]]})
 
-    # Stage 6b: LLM Edge Extract（一次性处理所有 confirmed，跳过相似类）
+    # ───────── Stage: edge_extract (LLM) ─────────
     t["edge_extract"] = []
     total_edges = len(algo_edges)
     if confirmed:
+        _emit("edge_extract", "start")
         count, extracted, new_edges, upd_edges = await _extract_and_persist_edges(
             entry_id, confirmed, subgraph, raw, slice_summary, entry_ts
         )
@@ -207,19 +251,34 @@ async def run_backbone_pipeline(
         t["edge_extract"].extend(extracted)
         t["db_diff"]["edges_new"].extend(new_edges)
         t["db_diff"]["edges_updated"].extend(upd_edges)
+        _emit("edge_extract", "done",
+              summary=f"{count} directed edges from LLM",
+              payload={"edges": [{"from": e.get("from_label", ""), "to": e.get("to_label", ""),
+                                  "relation_type": e.get("relation_type", ""),
+                                  "weight": round(float(e.get("weight") or 0), 4)} for e in extracted[:20]]})
+    else:
+        _emit("edge_extract", "skipped", reason="no_confirmed_nodes")
 
-    # Stage 6c: 算法共现 — confirmed 两两共现产出'related'边，重复共现累加权重
+    # ───────── Stage: association ─────────
+    _emit("association", "start")
     assoc_edges, assoc_new, assoc_upd = _write_association_edges(confirmed, emb_cache, entry_id, entry_ts)
     t["association_edges"] = assoc_edges
     t["db_diff"]["edges_new"].extend(assoc_new)
     t["db_diff"]["edges_updated"].extend(assoc_upd)
     total_edges += len(assoc_edges)
+    _emit("association", "done",
+          summary=f"{len(assoc_edges)} associative edges",
+          payload={"edges": [{"from": e.get("from_label", ""), "to": e.get("to_label", "")} for e in assoc_edges[:20]]})
 
-    # Stage 6d: 对立传染 — A⟷B 对立 且 A→C 支撑 ⇒ 推导 B⟷C 对立
+    # ───────── Stage: opposition_propagation ─────────
+    _emit("opposition_propagation", "start")
     opp_edges, opp_new = _propagate_opposition_edges(confirmed, entry_id, entry_ts)
     t["opposition_propagation"] = opp_edges
     t["db_diff"]["edges_new"].extend(opp_new)
     total_edges += len(opp_edges)
+    _emit("opposition_propagation", "done",
+          summary=f"{len(opp_edges)} propagated opposition edges",
+          payload={"edges": [{"from": e.get("from_label", ""), "to": e.get("to_label", "")} for e in opp_edges[:20]]})
 
     # Rollback: 边的 post-scan，找出本次写入涉及的所有边
     with get_conn() as conn:
@@ -1345,3 +1404,17 @@ def _format_subgraph(subgraph: dict) -> str:
                 f"{e.get('to_label', '')} (weight:{w:.2f})"
             )
     return "\n".join(lines)
+
+
+# ---------------------------------------------------------------------------
+# Stage emit summary helper
+# ---------------------------------------------------------------------------
+
+def _summarize_activations(activations: dict) -> str:
+    """Compact one-line summary for activation stage done event.
+    e.g. 'psychology 0.7, philosophy 0.6, technology 0.7'"""
+    if not activations:
+        return "(no domains activated)"
+    parts = [f"{k} {v:.1f}" for k, v in activations.items()]
+    s = ", ".join(parts)
+    return s[:77] + "..." if len(s) > 80 else s

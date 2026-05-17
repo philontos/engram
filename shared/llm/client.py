@@ -164,6 +164,48 @@ def _provider_supports_json_object(provider: str) -> bool:
     return _PROVIDER_CAPS.get(provider, {}).get("json_object", True)
 
 
+# Model-level capability: which models reject the `temperature` parameter
+# outright and return 400. Detection is substring-based on the lower-cased
+# model id (after stripping any routing prefix like `cc/`).
+#
+# Why pre-filter instead of relying on the 400 + strip-and-retry fallback:
+# some OpenAI-compatible proxies (e.g. 9router) treat the upstream 400 as a
+# "this account can't serve this model" signal and lock the account out for
+# 30s. The retry then hits a locked account and the whole pipeline collapses.
+# Pre-filtering avoids triggering the lock at all.
+#
+# Sources (verified, not guessed):
+#   Anthropic Opus 4.7 — "Starting with Claude Opus 4.7, setting temperature,
+#     top_p, or top_k to any non-default value will return a 400 error."
+#     https://platform.claude.com/docs/en/about-claude/models/whats-new-claude-4-7
+#     Note: Claude 4.0–4.6 (incl. sonnet-4-6, haiku-4-5) still ACCEPT temperature.
+#   OpenAI o-series — Azure/OpenAI docs: reasoning models do not support
+#     temperature/top_p; API returns "Unsupported parameter" 400.
+#     https://learn.microsoft.com/en-us/azure/ai-services/openai/how-to/reasoning
+#   DeepSeek-reasoner — silently ignores, no error. No need to filter.
+#   Qwen3 thinking / QwQ — accepts temperature (Qwen3 recommends 0.6).
+_NO_TEMPERATURE_MODELS: tuple[str, ...] = (
+    # Anthropic — only Opus 4.7 (per official docs)
+    "claude-opus-4-7",
+    # OpenAI reasoning series: o1*, o3*, o4-mini
+    "o1-",      # o1-mini, o1-preview, o1-pro
+    "o3-",      # o3-mini, o3-pro
+    "o4-mini",
+)
+
+
+def _supports_temperature(model: str) -> bool:
+    """Return False for models known to reject `temperature`. Unknown models
+    default to True; `_strip_unsupported_params_if_rejected` covers misses
+    when the upstream proxy doesn't penalise the 400."""
+    m = (model or "").lower()
+    if "/" in m:
+        m = m.rsplit("/", 1)[-1]
+    if m in ("o1", "o3"):
+        return False
+    return not any(s in m for s in _NO_TEMPERATURE_MODELS)
+
+
 _JSON_ONLY_HINT = (
     "\n\nIMPORTANT: Respond with a single valid JSON object only. "
     "No markdown fences, no prose, no explanation — JSON only."
@@ -241,7 +283,9 @@ def _looks_like_temperature_rejection(status_code: int, body: str) -> bool:
     low = (body or "").lower()
     if "temperature" not in low:
         return False
-    return any(n in low for n in ("deprecated", "unsupported", "not supported", "not allowed"))
+    # Prefix `deprecat` matches both `deprecated` and the truncated `deprecate`
+    # form some proxies (e.g. 9router) emit when they wrap upstream errors.
+    return any(n in low for n in ("deprecat", "unsupported", "not supported", "not allowed"))
 
 
 def _strip_unsupported_params_if_rejected(payload: dict, status_code: int, body: str) -> bool:
@@ -286,15 +330,24 @@ async def chat_json(
 
     use_json_format = _provider_supports_json_object(config["provider"])
 
+    # Anthropic rejects empty user-message content with 400 ("messages: at
+    # least one message is required"); OpenAI/Qwen accept it. Normalize at
+    # the library layer so callers that put everything in system_prompt
+    # (e.g. pipeline slice stages) work across providers.
+    user_content = (user_prompt or "").strip() or "Proceed."
     base_messages = [
         {"role": "system", "content": (system_prompt or "") + _JSON_ONLY_HINT},
-        {"role": "user", "content": user_prompt or ""},
+        {"role": "user", "content": user_content},
     ]
     base_payload: dict[str, Any] = {
         "model": config["model"],
-        "temperature": 0.1,
         "messages": base_messages,
+        # Explicit false — some OpenAI-compatible proxies (e.g. 9router) default
+        # to streaming when unset, which breaks the resp.json() path below.
+        "stream": False,
     }
+    if _supports_temperature(config["model"]):
+        base_payload["temperature"] = 0.1
     if use_json_format:
         base_payload["response_format"] = {"type": "json_object"}
 
@@ -414,11 +467,14 @@ async def chat_with_tools(
 
     payload = {
         "model": config["model"],
-        "temperature": 0.3,
         "messages": messages,
         "tools": tools,
         "tool_choice": "auto",
+        # Explicit false — see chat_json for rationale.
+        "stream": False,
     }
+    if _supports_temperature(config["model"]):
+        payload["temperature"] = 0.3
     prompt_chars = sum(len(m.get("content") or "") for m in messages)
     start = time.monotonic()
 
@@ -504,13 +560,14 @@ async def chat_with_tools_stream(
 
     payload = {
         "model": config["model"],
-        "temperature": temperature,
         "stream": True,
         "stream_options": {"include_usage": True},
         "messages": messages,
         "tools": tools,
         "tool_choice": "auto",
     }
+    if _supports_temperature(config["model"]):
+        payload["temperature"] = temperature
     prompt_chars = sum(len(m.get("content") or "") for m in messages)
     start = time.monotonic()
 
@@ -647,16 +704,19 @@ async def chat_text_stream(
             "Structured extraction LLM is not configured."
         )
 
+    # Anthropic rejects empty user-message content; normalize for cross-provider.
+    user_content = (user_prompt or "").strip() or "Proceed."
     payload = {
         "model": config["model"],
-        "temperature": temperature,
         "stream": True,
         "stream_options": {"include_usage": True},
         "messages": [
             {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
+            {"role": "user", "content": user_content},
         ],
     }
+    if _supports_temperature(config["model"]):
+        payload["temperature"] = temperature
     prompt_chars = len(system_prompt or "") + len(user_prompt or "")
     completion_chars = 0
     usage: dict = {}

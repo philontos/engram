@@ -21,6 +21,9 @@ dist/
 # Git worktrees
 .worktrees/
 
+# Superpowers brainstorming workspace (mockups, design drafts)
+.superpowers/
+
 # Personal exports & seed data (contain raw reflections — never commit)
 cognitive_entries*.json
 seed-reflections*.json

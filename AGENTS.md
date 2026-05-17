@@ -9,6 +9,13 @@ This file is read by Claude Code, Cursor, Codex, Copilot, and other agents that 
 - `cognitive-openclaw/` — OpenClaw plugin.
 - `shared/` — shared LLM client.
 
+## Product context
+
+- **`docs/product/STATUS.md` is the single source of truth** for what Engram is, who it serves, and what's explicitly out of scope. Read it on session start before making any product / architecture / scope suggestion.
+- **`docs/product/decisions/*.md`** (if/when present) is a write-only journal of past major decisions. **Do not read by default** — past decisions don't constrain new ones. Only consult when the user explicitly asks to review history (e.g., "what did we decide about X before?").
+- **When product understanding evolves:** OVERWRITE `STATUS.md` (not append). It's working memory, not a changelog.
+- **When a major decision happens:** APPEND a new `decisions/<id>-<slug>.md` (write-only — never edit existing archives). Then update STATUS.md to reflect the new judgment.
+
 ## Hard rules (apply everywhere)
 
 1. **Engram only stores cognitive content** — thoughts, reflections, ideas, decisions, observations, emotional self-analysis. The intent gate (`app/lib/intent_gate.py`) rejects pure event logs / reminders / factual notes. Do NOT add features that turn Engram into a notes / journal / todo app. If a feature pushes the system toward "log everything", say no.

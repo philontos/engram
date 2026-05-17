@@ -216,14 +216,8 @@ async def _run_pipeline(entry_id: int, row) -> ProcessResult:
     }
     llm_calls: list[dict] = []
 
-    def _emit(stage: str, status: str, **extra) -> None:
-        process_events.publish(entry_id, {
-            "type": "stage", "stage": stage, "status": status,
-            "elapsed_ms": int((time.perf_counter() - started_perf) * 1000),
-            **extra,
-        })
-
-    _emit("pipeline", "start", raw_chars=len(raw or ""))
+    emit = process_events.make_emitter(entry_id, started_perf)
+    emit("pipeline", "start", raw_chars=len(raw or ""))
 
     # Mark the entry as in-flight so the UI can show a distinct "processing"
     # badge instead of the misleading "captured / pending" one. The terminal
@@ -247,42 +241,33 @@ async def _run_pipeline(entry_id: int, row) -> ProcessResult:
     error_payload: dict | None = None
     try:
         with capture_llm_calls(llm_calls):
-            # Step 1: 切片生成 + 画像融合
-            _emit("slice", "start")
+            # generate_slice emits its own slice:* sub-stage events
             profile_before = _snapshot_profile()
-            slice_id = await generate_slice(entry_id, raw, trace=trace)
+            slice_id = await generate_slice(entry_id, raw, trace=trace, emit=emit)
             profile_after = _snapshot_profile()
 
             if slice_id:
                 trace["slice"] = _get_slice_features(slice_id)
                 trace["profile_diff"] = _calc_profile_diff(profile_before, profile_after)
                 _save_profile_snapshot(entry_id)
-                _emit("slice", "done",
-                      feature_count=len(trace["slice"]),
-                      profile_changed_subdims=sum(len(v) for v in trace["profile_diff"].values()))
-            else:
-                _emit("slice", "skipped", reason="slice_failed")
 
-            # Step 2: 主干网生长
-            if slice_id:
-                _emit("backbone", "start")
-                backbone_stats = await run_backbone_pipeline(entry_id, slice_id, raw, trace=trace, entry_dt=entry_dt)
+                # run_backbone_pipeline emits its own per-sub-stage events
+                backbone_stats = await run_backbone_pipeline(
+                    entry_id, slice_id, raw, trace=trace, entry_dt=entry_dt, emit=emit,
+                )
                 with get_conn() as conn:
                     conn.execute(
                         "UPDATE entries SET processing_status='processed' WHERE id=?", (entry_id,)
                     )
-                _emit("backbone", "done",
-                      activated=backbone_stats.get("activated", []),
-                      nodes_upserted=backbone_stats.get("nodes_upserted", 0),
-                      edges_upserted=backbone_stats.get("edges_upserted", 0))
             else:
                 with get_conn() as conn:
                     conn.execute(
                         "UPDATE entries SET processing_status='slice_failed' WHERE id=?", (entry_id,)
                     )
+                emit("slice", "skipped", reason="slice_generation_failed")
     except Exception as exc:
         error_payload = {"message": str(exc), "type": exc.__class__.__name__}
-        _emit("pipeline", "error", **error_payload)
+        emit("pipeline", "error", **error_payload)
         with get_conn() as conn:
             conn.execute(
                 "UPDATE entries SET processing_status='failed' WHERE id=?", (entry_id,)
@@ -305,10 +290,10 @@ async def _run_pipeline(entry_id: int, row) -> ProcessResult:
     _save_trace(entry_id, trace, rollback)
 
     final_status = "failed" if error_payload else ("done" if slice_id else "slice_failed")
-    _emit("pipeline", "done",
-          final_status=final_status,
-          duration_ms=trace["duration_ms"],
-          metrics=trace["metrics"])
+    emit("pipeline", "done",
+         final_status=final_status,
+         duration_ms=trace["duration_ms"],
+         metrics=trace["metrics"])
     process_events.finish(entry_id)
 
     return ProcessResult(

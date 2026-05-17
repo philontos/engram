@@ -2,6 +2,7 @@
 
 import json
 from string import Template
+from typing import Callable
 
 from app.lib.config_loader import DIMENSION_MAP, DIMENSIONS, ENTRY_ANALYZER_MAP
 from app.lib.db import get_conn
@@ -196,14 +197,23 @@ def _extraction_health(dim_cfg: dict, content: dict) -> dict:
     }
 
 
-async def generate_slice(entry_id: int, raw: str, trace: dict | None = None) -> int | None:
+async def generate_slice(
+    entry_id: int,
+    raw: str,
+    trace: dict | None = None,
+    emit: Callable[..., None] | None = None,
+) -> int | None:
     """生成并持久化一条 entry 的完整切片。返回 slice_id，失败返回 None。
 
     trace（可选）：传入则在 trace["slice_extraction_health"] 写入每维度的
     null/low_conf/midpoint_hedge 计数，供后续观测和 prompt 调优。
+    emit（可选）：传入则在每个子 stage 完成时调用 emit(stage, status, **extra)
+    用于实时事件流；不传时所有 emit 调用是 no-op。
     """
     if not is_structured_llm_configured():
         return None
+
+    _emit = emit or (lambda *a, **kw: None)
 
     profile_summary = get_profile_summary()
 
@@ -242,6 +252,7 @@ async def generate_slice(entry_id: int, raw: str, trace: dict | None = None) -> 
     situation_dim = ENTRY_ANALYZER_MAP.get("situation")
     situation_content: dict | None = None
     if situation_dim and situation_dim.get("enabled", True):
+        _emit("slice:situation", "start")
         situation_content = await _extract_dimension(situation_dim, enriched_raw, profile_summary)
         if situation_content:
             with get_conn() as conn:
@@ -249,6 +260,11 @@ async def generate_slice(entry_id: int, raw: str, trace: dict | None = None) -> 
                     "UPDATE entries SET situation_json=? WHERE id=?",
                     (json.dumps(situation_content, ensure_ascii=False), entry_id),
                 )
+            _emit("slice:situation", "done",
+                  summary=_summarize_situation(situation_content),
+                  payload=situation_content)
+        else:
+            _emit("slice:situation", "skipped", reason="empty_extraction")
 
     # 根据 situation 决定是否跳过画像融合
     # retrospective + recounting_past = 复述过去的自己，不应污染当前画像
@@ -266,8 +282,11 @@ async def generate_slice(entry_id: int, raw: str, trace: dict | None = None) -> 
             continue  # situation 已单独处理
         if not dim.get("enabled", True):
             continue
+        stage_name = f"slice:{dim['key']}"
+        _emit(stage_name, "start")
         raw_content = await _extract_dimension(dim, enriched_raw, profile_summary)
         if not raw_content:
+            _emit(stage_name, "skipped", reason="empty_extraction")
             continue
         # schema 兜底：异常子维度（缺字段 / 错类型）统一归一化为 None
         content = _normalize_extraction(dim, raw_content)
@@ -281,6 +300,9 @@ async def generate_slice(entry_id: int, raw: str, trace: dict | None = None) -> 
                 (slice_id, dim["key"], json.dumps(content, ensure_ascii=False)),
             )
         extracted[dim["key"]] = (dim, content)
+        _emit(stage_name, "done",
+              summary=_summarize_dimension(dim["key"], content),
+              payload=content)
 
     if trace is not None and health:
         trace["slice_extraction_health"] = health
@@ -348,3 +370,55 @@ def get_slice_summary(slice_id: int) -> str:
             parts.append(line)
 
     return "\n".join(parts) if parts else "(slice is empty)"
+
+
+# ---------------------------------------------------------------------------
+# Stage emit summary helpers
+# ---------------------------------------------------------------------------
+
+def _summarize_situation(content: dict) -> str:
+    """情境分析 stage 完成时的一行总结。
+    e.g. 'present + present_reflection · pressure=low · energy=medium'
+    """
+    if not isinstance(content, dict):
+        return "(empty)"
+    parts = []
+    if content.get("temporal_frame"):
+        parts.append(content["temporal_frame"])
+    if content.get("narrator_stance"):
+        parts.append(content["narrator_stance"])
+    extras = []
+    for k in ("pressure_level", "energy_level", "emotional_state"):
+        v = content.get(k)
+        if v:
+            extras.append(f"{k.replace('_level','')}={v}")
+    body = " · ".join(extras) if extras else ""
+    head = " + ".join(parts) if parts else "(no frame)"
+    s = f"{head}{' · ' + body if body else ''}"
+    return s[:77] + "..." if len(s) > 80 else s
+
+
+def _summarize_dimension(key: str, content: dict) -> str:
+    """人格维度 stage 完成时的一行总结。
+    mbti: 'E_I=15, S_N=92, T_F=10, J_P=null'
+    facts: 'name=null, occupation=foo'
+    """
+    if not isinstance(content, dict):
+        return "(empty)"
+    parts = []
+    for k, v in content.items():
+        if v is None:
+            parts.append(f"{k}=null")
+        elif isinstance(v, dict):
+            score = v.get("score")
+            value = v.get("value")
+            if score is not None:
+                parts.append(f"{k}={score}")
+            elif value is not None:
+                parts.append(f"{k}={value}")
+            else:
+                parts.append(f"{k}=…")
+        else:
+            parts.append(f"{k}={v}")
+    s = ", ".join(parts)
+    return s[:77] + "..." if len(s) > 80 else s

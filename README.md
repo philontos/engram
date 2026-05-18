@@ -155,31 +155,119 @@ Every entry contributes signals. Your profile evolves. The graph grows denser. O
 
 ## Quick start
 
+### Local development (no Docker required)
+
+Best for iterating on code: backend hot-reloads on `.py` changes, frontend has Vite HMR. Two terminals.
+
+**Prerequisites:** Python 3.12+, pnpm (Node 20+), and an LLM API key (any OpenAI-compatible provider — OpenAI / Anthropic / DeepSeek / Moonshot / 智谱 / Ollama / etc.).
+
+#### One-time setup
+
 ```bash
-git clone https://github.com/philontos/engram.git
-cd engram
+# API: create venv, install deps, copy env template
+cd api
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
 
-# Configure your LLM API key
-cp cognitive-service/.env.example cognitive-service/.env
-# Edit cognitive-service/.env: set LLM_BASE_URL, LLM_API_KEY, LLM_MODEL, EMBED_MODEL
-# (or pick a preset via LLM_PROVIDER — see Configuration below)
-
-# Build the dashboard UI
-pnpm --prefix cognitive-service/frontend install
-pnpm --prefix cognitive-service/frontend run build
-
-# Start the service
-docker compose up -d --build
+# Web: install node_modules
+cd ../web
+pnpm install
 ```
 
-The cognitive service starts at `http://localhost:18080`.  
-The dashboard UI is at `http://localhost:18080/`.
+Then edit `api/.env` and fill in your LLM credentials. Two options:
+
+- **Option A (explicit):** keep `LLM_BASE_URL` + set `LLM_API_KEY` and `LLM_MODEL`. Default points at OpenAI.
+- **Option B (preset):** comment out Option A; uncomment Option B and pick a provider:
+
+  ```bash
+  LLM_PROVIDER=anthropic            # or: openai | deepseek | moonshot | qwen | glm | gemini | ...
+  LLM_API_KEY=sk-ant-...
+  LLM_MODEL=claude-sonnet-4-5
+  ```
+
+#### Daily startup (two terminals)
+
+**Terminal 1 — API on `:18080`**
+
+```bash
+cd api
+source .venv/bin/activate
+PYTHONPATH=.. ENGRAM_DEV=1 uvicorn app.main:app \
+  --reload --reload-dir . --reload-dir ../shared \
+  --port 18080
+```
+
+Ready when you see `Application startup complete.`
+
+> **Why `PYTHONPATH=..` + `--reload-dir ../shared`?** `shared/` lives at the repo root (one level up from `api/`); `PYTHONPATH=..` puts it on Python's import path, and `--reload-dir ../shared` makes uvicorn pick up edits to `shared/` (the default `--reload` only watches the CWD). Inside Docker neither is needed — the Dockerfile copies `shared/` in and there's no reload.
+
+**Terminal 2 — Web on `:5173`**
+
+```bash
+cd web
+pnpm dev
+```
+
+Ready when you see `Local: http://localhost:5173/`.
+
+#### Open in browser
+
+http://localhost:5173
+
+#### Verify the pipe is wired up
+
+```bash
+curl http://localhost:5173/health     # via Vite proxy → FastAPI
+# → {"status":"ok"}
+```
+
+If that returns `ok`, the proxy and API are both fine. You can start capturing thoughts.
+
+#### Troubleshooting
+
+| Symptom | Likely cause / fix |
+|---|---|
+| `ModuleNotFoundError: No module named 'shared'` | `PYTHONPATH=..` missing, or running from wrong directory (must be `api/`). |
+| `/ui/api/stats` returns 404 in the browser | API isn't running on 18080, or it crashed — check Terminal 1. |
+| LLM call returns 401 / 403 | `api/.env` key missing or incorrect. |
+| White page / blank dashboard | Web dev server not running, or port 5173 occupied by another process. |
+| Capture is rejected with "intent gate" message | By design — Engram only stores reflections, not event logs. Phrase the entry as a thought, not a fact. |
+| Want to nuke local state and start fresh | `rm api/data/cognitive.db` and restart the API. |
+
+### Local Docker smoke test (recommended before VPS deploy)
+
+```bash
+cd deploy
+docker compose up --build
+# Open http://localhost in your browser.
+docker compose down  # when done
+```
+
+### VPS deployment (Tailscale-private, default)
+
+Prerequisites: Tailscale installed and running on the VPS, your laptop in the same Tailnet, VPS firewall blocks public access on :80.
+
+```bash
+ssh <vps>
+git clone <this-repo> ~/engram
+cd ~/engram
+cp api/.env.example api/.env  # fill in
+cd deploy
+docker compose up -d --build
+# Access from any Tailscale device: http://<vps-tailscale-ip>
+```
+
+### VPS deployment (Public HTTPS)
+
+See `deploy/Caddyfile.https.example` for the public-deployment template. WARNING: there is no built-in auth in v1; add a layer in front before exposing publicly.
 
 ---
 
 ## Connect to your AI tool
 
-The MCP server is a thin stdio bridge. Your AI client spawns it as a subprocess on demand; it forwards tool calls over HTTP to the cognitive-service running on `localhost:18080`. Build it once, then point each client at the same `dist/index.js`.
+The MCP server is a thin stdio bridge. Your AI client spawns it as a subprocess on demand; it forwards tool calls over HTTP to the api service running on `localhost:18080`. Build it once, then point each client at the same `dist/index.js`.
 
 ### Build the MCP server
 
@@ -270,7 +358,7 @@ cd cognitive-openclaw
 
 ```
 engram/
-  cognitive-service/     # Core backend — FastAPI, SQLite, HNSWLIB
+  api/                   # Core backend — FastAPI, SQLite, HNSWLIB
     app/
       config/
         dimensions/      # Profile dimensions: OCEAN, Schwartz, facts
@@ -278,10 +366,12 @@ engram/
         backbones/       # Knowledge graph domains
       lib/               # Pipelines: slice, backbone, profile merge, query
       routes/            # HTTP API
-    frontend/            # Dashboard UI (React + Vite)
+    migrations/
+  web/                   # Frontend SPA — React, Vite, Tailwind
+  deploy/                # docker-compose + Caddyfile
+  shared/                # Shared LLM client
   cognitive-mcp/         # MCP server — Claude Code, Cursor, etc.
   cognitive-openclaw/    # OpenClaw plugin
-  shared/                # Shared LLM client
 ```
 
 ---
@@ -363,7 +453,7 @@ EMBED_MODEL=text-embedding-3-small
 
 ### Adding a dimension
 
-Create `cognitive-service/app/config/dimensions/my_dim/`:
+Create `api/app/config/dimensions/my_dim/`:
 
 ```
 my_dim/

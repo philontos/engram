@@ -155,31 +155,119 @@ technology     ●●●○○○
 
 ## 快速开始
 
+### 本地开发（不需要 Docker）
+
+最适合代码迭代：后端 `.py` 改动自动重载，前端 Vite HMR。两个 terminal。
+
+**前置依赖：** Python 3.12+、pnpm（Node 20+）、以及一个 LLM API key（任何 OpenAI 兼容的服务商均可——OpenAI / Anthropic / DeepSeek / Moonshot / 智谱 / Ollama 等）。
+
+#### 一次性 setup
+
 ```bash
-git clone https://github.com/philontos/engram.git
-cd engram
+# API：建 venv、装依赖、复制 env 模板
+cd api
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
 
-# 配置 LLM API 密钥
-cp cognitive-service/.env.example cognitive-service/.env
-# 编辑 cognitive-service/.env：填写 LLM_BASE_URL、LLM_API_KEY、LLM_MODEL、EMBED_MODEL
-# （或者用 LLM_PROVIDER 选预设——见下面的 Configuration 章节）
-
-# 构建 Dashboard 前端
-pnpm --prefix cognitive-service/frontend install
-pnpm --prefix cognitive-service/frontend run build
-
-# 启动服务
-docker compose up -d --build
+# Web：装 node_modules
+cd ../web
+pnpm install
 ```
 
-服务启动在 `http://localhost:18080`。  
-Dashboard UI 在 `http://localhost:18080/`。
+然后编辑 `api/.env`，填入你的 LLM 凭据。两种方式：
+
+- **方式 A（显式配置）：** 保留 `LLM_BASE_URL`，填 `LLM_API_KEY` 和 `LLM_MODEL`。默认指向 OpenAI。
+- **方式 B（预设 provider）：** 注释掉方式 A，反注释方式 B，挑一个 provider：
+
+  ```bash
+  LLM_PROVIDER=anthropic            # 也可: openai | deepseek | moonshot | qwen | glm | gemini | ...
+  LLM_API_KEY=sk-ant-...
+  LLM_MODEL=claude-sonnet-4-5
+  ```
+
+#### 日常启动（两个 terminal）
+
+**Terminal 1 — API，端口 `:18080`**
+
+```bash
+cd api
+source .venv/bin/activate
+PYTHONPATH=.. ENGRAM_DEV=1 uvicorn app.main:app \
+  --reload --reload-dir . --reload-dir ../shared \
+  --port 18080
+```
+
+看到 `Application startup complete.` 即就绪。
+
+> **为什么要 `PYTHONPATH=..` 加 `--reload-dir ../shared`？** `shared/` 在仓库根目录（`api/` 的上一级）：`PYTHONPATH=..` 把它加进 Python 的 import path，`--reload-dir ../shared` 让 uvicorn 把 `shared/` 也纳入热重载监控（默认 `--reload` 只盯 CWD）。Docker 镜像里 Dockerfile 把 `shared/` 拷贝进去且不需要 reload，所以两个都不需要。
+
+**Terminal 2 — Web，端口 `:5173`**
+
+```bash
+cd web
+pnpm dev
+```
+
+看到 `Local: http://localhost:5173/` 即就绪。
+
+#### 浏览器访问
+
+http://localhost:5173
+
+#### 验证整条链路
+
+```bash
+curl http://localhost:5173/health     # 通过 Vite proxy 转给 FastAPI
+# → {"status":"ok"}
+```
+
+返回 `ok` 说明 proxy + API 都正常，可以开始写 entry。
+
+#### 常见问题
+
+| 现象 | 可能原因 / 修复 |
+|---|---|
+| `ModuleNotFoundError: No module named 'shared'` | 漏了 `PYTHONPATH=..`，或没在 `api/` 目录下执行。 |
+| 浏览器里 `/ui/api/stats` 返回 404 | API 没起在 18080，或起来后崩了——看 Terminal 1。 |
+| LLM 调用返回 401 / 403 | `api/.env` 的 key 没填或填错。 |
+| 白屏 / dashboard 加载不出来 | Web dev server 没起，或 5173 端口被别的进程占用。 |
+| Capture 被 "intent gate" 拒绝 | 设计如此——Engram 只接受反思类内容，不存事件流水。把句子写成"思考"，不要写成"事实"。 |
+| 想清空本地状态从零开始 | `rm api/data/cognitive.db`，重启 API。 |
+
+### 本地 Docker 冒烟测试（推送 VPS 前推荐）
+
+```bash
+cd deploy
+docker compose up --build
+# 浏览器打开 http://localhost
+docker compose down  # 完事后停止
+```
+
+### VPS 部署（默认：Tailscale 私网模式）
+
+前置条件：VPS 已安装并启用 Tailscale，本地设备加入同一 Tailnet，VPS 防火墙不开放公网 80 端口。
+
+```bash
+ssh <vps>
+git clone <this-repo> ~/engram
+cd ~/engram
+cp api/.env.example api/.env  # 填入凭据
+cd deploy
+docker compose up -d --build
+# 从任意 Tailscale 设备访问：http://<vps-tailscale-ip>
+```
+
+### VPS 部署（公网 HTTPS）
+
+参考 `deploy/Caddyfile.https.example` 公网部署模板。**警告**：v1 没有内置认证，对外暴露前请在前面挂一层（如 basic-auth / OIDC 代理）。
 
 ---
 
 ## 接入到你的 AI 工具
 
-MCP server 是一层薄薄的 stdio 桥接：AI 客户端按需把它 fork 为子进程，子进程再通过 HTTP 把工具调用转给跑在 `localhost:18080` 的 cognitive-service。构建一次，所有客户端都指向同一个 `dist/index.js`。
+MCP server 是一层薄薄的 stdio 桥接：AI 客户端按需把它 fork 为子进程，子进程再通过 HTTP 把工具调用转给跑在 `localhost:18080` 的 api service。构建一次，所有客户端都指向同一个 `dist/index.js`。
 
 ### 构建 MCP server
 
@@ -270,7 +358,7 @@ cd cognitive-openclaw
 
 ```
 engram/
-  cognitive-service/     # 核心后端 — FastAPI、SQLite、HNSWLIB
+  api/                   # 核心后端 — FastAPI、SQLite、HNSWLIB
     app/
       config/
         dimensions/      # 画像维度：OCEAN、Schwartz、facts
@@ -278,10 +366,12 @@ engram/
         backbones/       # 知识图谱域
       lib/               # 管线：slice / backbone / profile merge / query
       routes/            # HTTP API
-    frontend/            # Dashboard UI（React + Vite）
+    migrations/
+  web/                   # 前端 SPA — React、Vite、Tailwind
+  deploy/                # docker-compose + Caddyfile
+  shared/                # 共享 LLM 客户端
   cognitive-mcp/         # MCP 服务器 — Claude Code、Cursor 等
   cognitive-openclaw/    # OpenClaw 插件
-  shared/                # 共享 LLM 客户端
 ```
 
 ---
@@ -363,7 +453,7 @@ EMBED_MODEL=text-embedding-3-small
 
 ### 添加维度
 
-在 `cognitive-service/app/config/dimensions/my_dim/` 创建：
+在 `api/app/config/dimensions/my_dim/` 创建：
 
 ```
 my_dim/

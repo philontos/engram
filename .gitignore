@@ -28,5 +28,5 @@ dist/
 cognitive_entries*.json
 seed-reflections*.json
 
-# autonomous harness — cycle worktrees
-.harness-worktrees/
+# lanes — forge worktrees
+.forge-worktrees/

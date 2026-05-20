@@ -47,6 +47,8 @@ def revert_entry(entry_id: int):
     prev_snapshot_id = rollback.get("prev_profile_snapshot_id")
     nodes = rollback.get("nodes", [])
     edges = rollback.get("edges", [])
+    rollback_contacts = rollback.get("contacts", []) or []
+    rollback_evidence = rollback.get("contact_evidence", []) or []
 
     with get_conn() as conn:
         # 1. 恢复 profile_dimensions
@@ -106,6 +108,25 @@ def revert_entry(entry_id: int):
                  e["last_reinforced_at"], e["edge_source"], e["id"]),
             )
 
+        # 4a. contacts / contact_evidence — 只 undo 本次新增
+        if rollback_evidence:
+            ph = ",".join("?" * len(rollback_evidence))
+            conn.execute(f"DELETE FROM contact_evidence WHERE id IN ({ph})", rollback_evidence)
+        if rollback_contacts:
+            ph = ",".join("?" * len(rollback_contacts))
+            # 先确保没有外部 evidence 引用（其他 entry 也命中过它）
+            # 命中过其他 entry → 不删主行
+            to_delete = []
+            for cid in rollback_contacts:
+                ref = conn.execute(
+                    "SELECT 1 FROM contact_evidence WHERE contact_id=? LIMIT 1", (cid,)
+                ).fetchone()
+                if not ref:
+                    to_delete.append(cid)
+            if to_delete:
+                ph2 = ",".join("?" * len(to_delete))
+                conn.execute(f"DELETE FROM contacts WHERE id IN ({ph2})", to_delete)
+
         # 4. 删除衍生数据
         slice_ids = [r["id"] for r in conn.execute("SELECT id FROM slices WHERE entry_id=?", (entry_id,)).fetchall()]
         if slice_ids:
@@ -126,4 +147,6 @@ def revert_entry(entry_id: int):
         "edges_restored": len(updated_edges),
         "edges_deleted": len(new_edge_ids),
         "profile_restored": prev_snapshot_id is not None,
+        "contacts_deleted": len(rollback_contacts),
+        "contact_evidence_deleted": len(rollback_evidence),
     }

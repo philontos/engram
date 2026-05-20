@@ -30,3 +30,6 @@ seed-reflections*.json
 
 # lanes — forge worktrees
 .forge-worktrees/
+
+# lanes — compass cycle scratch
+.compass-cycles/

@@ -159,3 +159,30 @@ def test_key_indexes_exist(db):
     assert "idx_backbone_nodes_strength" in _indexes(db, "backbone_nodes")
     assert "idx_backbone_edges_from" in _indexes(db, "backbone_edges")
     assert "idx_slice_features_dimension" in _indexes(db, "slice_features")
+
+
+def test_contacts_schema(db):
+    with db.get_conn() as conn:
+        cols = {row[1] for row in conn.execute("PRAGMA table_info(contacts)")}
+        assert cols == {
+            "id", "display_name", "aliases_json",
+            "status", "merged_into_id",
+            "relationship_kind", "kind_locked", "field_locks_json",
+            "active_status", "intimacy_score",
+            "first_seen_entry_id", "last_seen_entry_id", "last_interaction_at",
+            "context_summary", "metadata_json",
+            "created_at", "updated_at",
+        }
+        ev_cols = {row[1] for row in conn.execute("PRAGMA table_info(contact_evidence)")}
+        assert ev_cols == {
+            "id", "contact_id", "entry_id",
+            "mention_text", "excerpt", "confidence",
+            "suggested_kind", "ambiguous_candidate_ids_json",
+            "interaction_observed", "created_at",
+        }
+        # 索引存在
+        idx = {row[1] for row in conn.execute("PRAGMA index_list(contacts)")}
+        assert {"idx_contacts_status", "idx_contacts_display_name",
+                "idx_contacts_last_interaction", "idx_contacts_first_seen_entry"} <= idx
+        ev_idx = {row[1] for row in conn.execute("PRAGMA index_list(contact_evidence)")}
+        assert {"idx_contact_evidence_contact", "idx_contact_evidence_entry"} <= ev_idx

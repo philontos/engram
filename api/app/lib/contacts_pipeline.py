@@ -185,7 +185,9 @@ def _process_mention(entry_id: int, m: dict, known: list[dict], result: dict) ->
     verdict = m.get("verdict")
     if verdict == "new_candidate":
         _handle_new_candidate(entry_id, m, result)
-    # 后续 task 加 match_existing / ambiguous 分支
+    elif verdict == "match_existing":
+        _handle_match_existing(entry_id, m, result)
+    # ambiguous: 下一 task
 
 
 def _handle_new_candidate(entry_id: int, m: dict, result: dict) -> None:
@@ -224,4 +226,69 @@ def _handle_new_candidate(entry_id: int, m: dict, result: dict) -> None:
     result["candidates_created"].append(contact_id)
     result["evidence_attached"].append(evidence_id)
     result["rollback_contacts"].append(contact_id)
+    result["rollback_evidence"].append(evidence_id)
+
+
+def _handle_match_existing(entry_id: int, m: dict, result: dict) -> None:
+    cid = m.get("matched_contact_id")
+    if not isinstance(cid, int):
+        return
+
+    with get_conn() as conn:
+        row = conn.execute(
+            "SELECT id, aliases_json, relationship_kind, kind_locked, field_locks_json "
+            "FROM contacts WHERE id=? AND status IN ('candidate','confirmed')",
+            (cid,),
+        ).fetchone()
+        if not row:
+            return
+
+        # aliases merge（去重保序）
+        try:
+            current_aliases = json.loads(row["aliases_json"] or "[]")
+        except Exception:
+            current_aliases = []
+        suggested_aliases = m.get("suggested_aliases") or []
+        merged_aliases = list(current_aliases)
+        seen = {a.lower() for a in current_aliases if isinstance(a, str)}
+        for a in suggested_aliases:
+            if isinstance(a, str) and a.lower() not in seen:
+                merged_aliases.append(a)
+                seen.add(a.lower())
+
+        # kind 填充：仅当当前 NULL 且未锁
+        kind = m.get("suggested_kind") if m.get("suggested_kind") in _ALLOWED_KINDS else None
+        new_kind = row["relationship_kind"]
+        if row["relationship_kind"] is None and row["kind_locked"] == 0 and kind is not None:
+            new_kind = kind
+
+        interaction = 1 if m.get("interaction_observed") else 0
+        # last_interaction_at 仅当有互动语境才更新
+        conn.execute(
+            """UPDATE contacts SET
+                 aliases_json=?,
+                 relationship_kind=?,
+                 last_seen_entry_id=?,
+                 last_interaction_at=CASE WHEN ?=1 THEN CURRENT_TIMESTAMP ELSE last_interaction_at END,
+                 updated_at=CURRENT_TIMESTAMP
+               WHERE id=?""",
+            (json.dumps(merged_aliases, ensure_ascii=False), new_kind,
+             entry_id, interaction, cid),
+        )
+
+        ev_cur = conn.execute(
+            """INSERT INTO contact_evidence
+                 (contact_id, entry_id, mention_text, excerpt, confidence,
+                  suggested_kind, interaction_observed)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            (cid, entry_id,
+             m.get("mention_text") or "",
+             m.get("excerpt") or "",
+             float(m.get("confidence") or 0.0),
+             kind, interaction),
+        )
+        evidence_id = ev_cur.lastrowid
+
+    result["matched_existing"].append(cid)
+    result["evidence_attached"].append(evidence_id)
     result["rollback_evidence"].append(evidence_id)

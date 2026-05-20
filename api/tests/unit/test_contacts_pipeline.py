@@ -176,7 +176,9 @@ async def test_ambiguous_writes_evidence_with_null_contact(db, entry_factory):
             "suggested_kind": None, "context_summary": "", "confidence": 0.5,
         }],
     })
-    def emit(*a, **kw): pass
+    emits: list[tuple] = []
+    def emit(stage, status, **extra):
+        emits.append((stage, status, extra))
     with patch.object(contacts_pipeline, "chat_json", new=fake_llm), \
          patch.object(contacts_pipeline, "is_structured_llm_configured", return_value=True):
         result = await contacts_pipeline.run_contacts_pipeline(entry_id, "张三 又联系我了", trace={}, emit=emit)
@@ -190,6 +192,13 @@ async def test_ambiguous_writes_evidence_with_null_contact(db, entry_factory):
         assert ev["contact_id"] is None
         assert json.loads(ev["ambiguous_candidate_ids_json"]) == [c1, c2]
         assert ev["interaction_observed"] == 1
+
+    # `done` emit 必须报告 ambiguous=1（spec §3 emit 契约）
+    done_events = [extra for stage, status, extra in emits if stage == "contacts" and status == "done"]
+    assert len(done_events) == 1
+    assert done_events[0]["ambiguous"] == 1
+    # 私有键不该泄漏给 emit 后的 caller
+    assert "_ambiguous_evidence_ids" not in result
 
 
 @pytest.mark.asyncio

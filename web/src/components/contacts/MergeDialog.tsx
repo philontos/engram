@@ -35,13 +35,20 @@ export function MergeDialog({ source, targets, onClose, onDone }: Props) {
           <option value="">--</option>
           {targets.map(c => <option key={c.id} value={c.id}>{c.display_name} ({c.status})</option>)}
         </select>
-        {target && (
-          <div className="text-xs border rounded p-2 mb-2">
-            <div className="font-medium">{t('contacts.merge_dialog_preview')}</div>
-            <div>aliases → {JSON.stringify(Array.from(new Set([...target.aliases, ...source.aliases, source.display_name])))}</div>
-            <div>kind → {target.relationship_kind ?? source.relationship_kind ?? '(null)'}</div>
-          </div>
-        )}
+        {target && (() => {
+          const mergedAliases = Array.from(new Set([...target.aliases, ...source.aliases, source.display_name]))
+          const effectiveKind = target.relationship_kind ?? source.relationship_kind
+          const kindLabel = effectiveKind
+            ? t(`contacts.kind_${effectiveKind}` as any)
+            : t('contacts.merge_dialog_null_placeholder')
+          return (
+            <div className="text-xs border rounded p-2 mb-2">
+              <div className="font-medium">{t('contacts.merge_dialog_preview')}</div>
+              <div>{t('contacts.merge_dialog_aliases_label')} {JSON.stringify(mergedAliases)}</div>
+              <div>{t('contacts.merge_dialog_kind_label')} {kindLabel}</div>
+            </div>
+          )
+        })()}
         <div className="flex justify-end gap-2">
           <button className="border px-3 py-1" onClick={onClose}>{t('common.cancel')}</button>
           <button className="border px-3 py-1" onClick={submit} disabled={pickId == null || busy}>

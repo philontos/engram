@@ -99,7 +99,7 @@ function AmbiguousCard({ ev, confirmed, onChanged }: { ev: Evidence; confirmed: 
                   }
                   onChanged()
                 }}>
-          OK
+          {t('common.confirm')}
         </button>
         <button className="border px-2 py-0.5 text-xs"
                 onClick={async () => { await ContactsAPI.dismissEvidence(ev.id); onChanged() }}>

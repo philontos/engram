@@ -107,8 +107,7 @@ async def run_contacts_pipeline(
     _emit("contacts", "done",
           candidates_created=len(result["candidates_created"]),
           matched_existing=len(result["matched_existing"]),
-          ambiguous=sum(1 for e in result["evidence_attached"]
-                        if e in result["_ambiguous_evidence_ids"]) if "_ambiguous_evidence_ids" in result else 0,
+          ambiguous=len(result.get("_ambiguous_evidence_ids", [])),
           evidence_attached=len(result["evidence_attached"]))
     result.pop("_ambiguous_evidence_ids", None)
     return result
@@ -333,3 +332,4 @@ def _handle_ambiguous(entry_id: int, m: dict, result: dict) -> None:
 
     result["evidence_attached"].append(evidence_id)
     result["rollback_evidence"].append(evidence_id)
+    result.setdefault("_ambiguous_evidence_ids", []).append(evidence_id)

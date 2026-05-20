@@ -195,6 +195,24 @@ def _handle_new_candidate(entry_id: int, m: dict, result: dict) -> None:
     name = (m.get("suggested_display_name") or m.get("mention_text") or "").strip()
     if not name:
         return
+
+    # 本地兜底：同名 candidate / confirmed 已存在 → 降级为 match_existing
+    with get_conn() as conn:
+        existing = conn.execute(
+            """SELECT id FROM contacts
+               WHERE status IN ('candidate','confirmed')
+                 AND (lower(display_name) = lower(?)
+                      OR lower(aliases_json) LIKE '%' || lower(?) || '%')
+               LIMIT 1""",
+            (name, name),
+        ).fetchone()
+    if existing:
+        demoted = dict(m)
+        demoted["verdict"] = "match_existing"
+        demoted["matched_contact_id"] = existing["id"]
+        _handle_match_existing(entry_id, demoted, result)
+        return
+
     aliases = m.get("suggested_aliases") or []
     kind = m.get("suggested_kind") if m.get("suggested_kind") in _ALLOWED_KINDS else None
     context = (m.get("context_summary") or "").strip()

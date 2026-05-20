@@ -190,3 +190,34 @@ async def test_ambiguous_writes_evidence_with_null_contact(db, entry_factory):
         assert ev["contact_id"] is None
         assert json.loads(ev["ambiguous_candidate_ids_json"]) == [c1, c2]
         assert ev["interaction_observed"] == 1
+
+
+@pytest.mark.asyncio
+async def test_new_candidate_demoted_when_name_already_exists(db, entry_factory):
+    """LLM 说 new_candidate，但同名已存在 → 应降级为 match_existing。"""
+    from app.lib import contacts_pipeline
+
+    with db.get_conn() as conn:
+        cid = conn.execute(
+            "INSERT INTO contacts (display_name, aliases_json, status) VALUES ('小李', '[\"Lee\"]', 'candidate')"
+        ).lastrowid
+    entry_id = entry_factory("又见到小李了")
+
+    fake_llm = AsyncMock(return_value={
+        "mentions": [{
+            "verdict": "new_candidate", "matched_contact_id": None, "candidate_contact_ids": [],
+            "mention_text": "小李", "excerpt": "又见到小李了", "interaction_observed": True,
+            "suggested_display_name": "小李", "suggested_aliases": [], "suggested_kind": None,
+            "context_summary": "", "confidence": 0.7,
+        }],
+    })
+    def emit(*a, **kw): pass
+    with patch.object(contacts_pipeline, "chat_json", new=fake_llm), \
+         patch.object(contacts_pipeline, "is_structured_llm_configured", return_value=True):
+        result = await contacts_pipeline.run_contacts_pipeline(entry_id, "又见到小李了", trace={}, emit=emit)
+
+    assert result["candidates_created"] == []
+    assert result["matched_existing"] == [cid]
+    with db.get_conn() as conn:
+        n = conn.execute("SELECT COUNT(*) c FROM contacts").fetchone()["c"]
+        assert n == 1   # 没创建第二条

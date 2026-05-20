@@ -131,3 +131,31 @@ def test_confirm_already_confirmed_409(db, client):
     cid = _seed(db, display_name="P", status="confirmed")
     r = client.post(f"/ui/api/contacts/{cid}/confirm", json={})
     assert r.status_code == 409
+
+
+# ---- T12: PATCH editor + kind_locked reset ----
+
+def test_patch_kind_locks(db, client):
+    cid = _seed(db, display_name="A", status="confirmed", relationship_kind=None)
+    r = client.patch(f"/ui/api/contacts/{cid}", json={"relationship_kind": "colleague"})
+    assert r.status_code == 200
+    with db.get_conn() as conn:
+        row = conn.execute("SELECT * FROM contacts WHERE id=?", (cid,)).fetchone()
+        assert row["relationship_kind"] == "colleague"
+        assert row["kind_locked"] == 1
+
+
+def test_patch_reset_kind(db, client):
+    cid = _seed(db, display_name="A", status="confirmed", relationship_kind="friend", kind_locked=1)
+    r = client.patch(f"/ui/api/contacts/{cid}", json={"relationship_kind": None, "kind_locked": False})
+    assert r.status_code == 200
+    with db.get_conn() as conn:
+        row = conn.execute("SELECT * FROM contacts WHERE id=?", (cid,)).fetchone()
+        assert row["relationship_kind"] is None
+        assert row["kind_locked"] == 0
+
+
+def test_patch_cannot_change_status_directly(db, client):
+    cid = _seed(db, display_name="A", status="confirmed")
+    r = client.patch(f"/ui/api/contacts/{cid}", json={"status": "merged"})
+    assert r.status_code == 422

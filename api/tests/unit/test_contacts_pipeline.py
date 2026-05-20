@@ -245,3 +245,27 @@ def test_truncate_by_recency_keeps_top_k(db):
     assert len(truncated) == 100
     # 最新（P0、P1...）应靠前
     assert truncated[0]["display_name"] == "P0"
+
+
+@pytest.mark.asyncio
+async def test_llm_not_configured_emits_skipped(db, entry_factory):
+    from app.lib import contacts_pipeline
+    entry_id = entry_factory("x")
+    emits = []
+    def emit(s, st, **kw): emits.append((s, st, kw))
+    with patch.object(contacts_pipeline, "is_structured_llm_configured", return_value=False):
+        result = await contacts_pipeline.run_contacts_pipeline(entry_id, "x", trace={}, emit=emit)
+    assert result["candidates_created"] == [] and result["evidence_attached"] == []
+    assert ("contacts", "skipped", {"reason": "llm_not_configured"}) in [(s, st, kw) for s, st, kw in emits]
+
+
+@pytest.mark.asyncio
+async def test_llm_exception_bubbles_up(db, entry_factory):
+    """contacts_pipeline 不自己 swallow LLM 异常；上层 _await_pair 才捕获。"""
+    from app.lib import contacts_pipeline
+    entry_id = entry_factory("x")
+    async def boom(**kw): raise RuntimeError("llm bad")
+    with patch.object(contacts_pipeline, "chat_json", new=boom), \
+         patch.object(contacts_pipeline, "is_structured_llm_configured", return_value=True):
+        with pytest.raises(RuntimeError):
+            await contacts_pipeline.run_contacts_pipeline(entry_id, "x", trace={}, emit=lambda *a, **kw: None)

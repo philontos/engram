@@ -159,3 +159,66 @@ def test_patch_cannot_change_status_directly(db, client):
     cid = _seed(db, display_name="A", status="confirmed")
     r = client.patch(f"/ui/api/contacts/{cid}", json={"status": "merged"})
     assert r.status_code == 422
+
+
+# ---- T13: Merge endpoint ----
+
+def test_merge_candidate_into_confirmed_moves_evidence(db, client):
+    a = _seed(db, display_name="A", status="candidate", relationship_kind=None)
+    b = _seed(db, display_name="A2", aliases_json='["A2"]', status="confirmed", relationship_kind="friend")
+    with db.get_conn() as conn:
+        entry_id = conn.execute(
+            "INSERT INTO entries (raw, type, memory_type) VALUES ('x', 'text', 'thought')"
+        ).lastrowid
+        conn.execute("INSERT INTO contact_evidence (contact_id, entry_id) VALUES (?, ?)", (a, entry_id))
+
+    r = client.post(f"/ui/api/contacts/{a}/merge", json={"into_id": b})
+    assert r.status_code == 200, r.text
+    assert r.json()["evidence_moved"] == 1
+    with db.get_conn() as conn:
+        ra = conn.execute("SELECT * FROM contacts WHERE id=?", (a,)).fetchone()
+        rb = conn.execute("SELECT * FROM contacts WHERE id=?", (b,)).fetchone()
+        assert ra["status"] == "merged" and ra["merged_into_id"] == b
+        assert "A" in json.loads(rb["aliases_json"])
+        ev = conn.execute("SELECT contact_id FROM contact_evidence WHERE entry_id=?", (entry_id,)).fetchone()
+        assert ev["contact_id"] == b
+
+
+def test_merge_self_409(db, client):
+    a = _seed(db, display_name="A", status="confirmed")
+    r = client.post(f"/ui/api/contacts/{a}/merge", json={"into_id": a})
+    assert r.status_code == 409
+
+
+def test_merge_into_merged_409(db, client):
+    a = _seed(db, display_name="A", status="confirmed")
+    b = _seed(db, display_name="B", status="merged")
+    r = client.post(f"/ui/api/contacts/{a}/merge", json={"into_id": b})
+    assert r.status_code == 409
+
+
+def test_merge_candidate_into_candidate_allowed(db, client):
+    a = _seed(db, display_name="A", status="candidate")
+    b = _seed(db, display_name="B", status="candidate")
+    r = client.post(f"/ui/api/contacts/{a}/merge", json={"into_id": b})
+    assert r.status_code == 200
+
+
+def test_merge_rewrites_ambiguous_candidate_ids(db, client):
+    a = _seed(db, display_name="A", status="candidate")
+    b = _seed(db, display_name="B", status="confirmed")
+    with db.get_conn() as conn:
+        entry_id = conn.execute(
+            "INSERT INTO entries (raw, type, memory_type) VALUES ('x', 'text', 'thought')"
+        ).lastrowid
+        # ambiguous evidence 列表里含 a
+        conn.execute(
+            "INSERT INTO contact_evidence (contact_id, entry_id, ambiguous_candidate_ids_json) VALUES (NULL, ?, ?)",
+            (entry_id, json.dumps([a, 999])),
+        )
+    r = client.post(f"/ui/api/contacts/{a}/merge", json={"into_id": b})
+    assert r.status_code == 200
+    with db.get_conn() as conn:
+        ev = conn.execute("SELECT ambiguous_candidate_ids_json FROM contact_evidence WHERE contact_id IS NULL").fetchone()
+        ids = json.loads(ev["ambiguous_candidate_ids_json"])
+        assert b in ids and a not in ids

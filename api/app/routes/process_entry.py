@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from app.lib.backbone_pipeline import run_backbone_pipeline
+from app.lib.contacts_pipeline import run_contacts_pipeline
 from app.lib.db import get_conn
 from app.lib import process_events
 from app.lib.slice_pipeline import generate_slice
@@ -238,32 +239,58 @@ async def _run_pipeline(entry_id: int, row) -> ProcessResult:
 
     slice_id: int | None = None
     backbone_stats: dict = {}
+    contacts_stats: dict = {}
     error_payload: dict | None = None
     try:
         with capture_llm_calls(llm_calls):
-            # generate_slice emits its own slice:* sub-stage events
             profile_before = _snapshot_profile()
-            slice_id = await generate_slice(entry_id, raw, trace=trace, emit=emit)
-            profile_after = _snapshot_profile()
 
+            slice_task    = asyncio.create_task(generate_slice(entry_id, raw, trace=trace, emit=emit))
+            contacts_task = asyncio.create_task(run_contacts_pipeline(entry_id, raw, trace=trace, emit=emit))
+
+            # 等 slice
+            try:
+                slice_id = await slice_task
+            except Exception:
+                # 让上层异常处理走原逻辑
+                raise
+
+            profile_after = _snapshot_profile()
             if slice_id:
                 trace["slice"] = _get_slice_features(slice_id)
                 trace["profile_diff"] = _calc_profile_diff(profile_before, profile_after)
                 _save_profile_snapshot(entry_id)
 
-                # run_backbone_pipeline emits its own per-sub-stage events
-                backbone_stats = await run_backbone_pipeline(
-                    entry_id, slice_id, raw, trace=trace, entry_dt=entry_dt, emit=emit,
+                backbone_task = asyncio.create_task(
+                    run_backbone_pipeline(entry_id, slice_id, raw, trace=trace, entry_dt=entry_dt, emit=emit)
                 )
+
+                # 等 backbone + contacts，独立 swallow
+                bres, cres = await asyncio.gather(backbone_task, contacts_task, return_exceptions=True)
+                if isinstance(bres, Exception):
+                    trace["backbone_error"] = {"message": str(bres), "type": bres.__class__.__name__}
+                    emit("backbone", "error", message=str(bres), type=bres.__class__.__name__)
+                    backbone_stats = {}
+                else:
+                    backbone_stats = bres
+                if isinstance(cres, Exception):
+                    trace["contacts_error"] = {"message": str(cres), "type": cres.__class__.__name__}
+                    emit("contacts", "error", message=str(cres), type=cres.__class__.__name__)
+                    contacts_stats = {}
+                else:
+                    contacts_stats = cres
+
                 with get_conn() as conn:
-                    conn.execute(
-                        "UPDATE entries SET processing_status='processed' WHERE id=?", (entry_id,)
-                    )
+                    conn.execute("UPDATE entries SET processing_status='processed' WHERE id=?", (entry_id,))
             else:
+                # slice 返回 None：取消 contacts，标 slice_failed
+                try:
+                    contacts_task.cancel()
+                    await asyncio.gather(contacts_task, return_exceptions=True)
+                except Exception:
+                    pass
                 with get_conn() as conn:
-                    conn.execute(
-                        "UPDATE entries SET processing_status='slice_failed' WHERE id=?", (entry_id,)
-                    )
+                    conn.execute("UPDATE entries SET processing_status='slice_failed' WHERE id=?", (entry_id,))
                 emit("slice", "skipped", reason="slice_generation_failed")
     except Exception as exc:
         error_payload = {"message": str(exc), "type": exc.__class__.__name__}
@@ -285,6 +312,8 @@ async def _run_pipeline(entry_id: int, row) -> ProcessResult:
         "prev_profile_snapshot_id": prev_snapshot_id,
         "nodes": backbone_stats.get("rollback_nodes", []),
         "edges": backbone_stats.get("rollback_edges", []),
+        "contacts":         contacts_stats.get("rollback_contacts", []),
+        "contact_evidence": contacts_stats.get("rollback_evidence", []),
     } if slice_id else None
 
     _save_trace(entry_id, trace, rollback)

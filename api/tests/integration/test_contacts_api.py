@@ -222,3 +222,59 @@ def test_merge_rewrites_ambiguous_candidate_ids(db, client):
         ev = conn.execute("SELECT ambiguous_candidate_ids_json FROM contact_evidence WHERE contact_id IS NULL").fetchone()
         ids = json.loads(ev["ambiguous_candidate_ids_json"])
         assert b in ids and a not in ids
+
+
+# ---- T14: evidence assign/dismiss ----
+
+def test_assign_ambiguous_to_existing(db, client):
+    target = _seed(db, display_name="X", status="confirmed")
+    with db.get_conn() as conn:
+        entry_id = conn.execute(
+            "INSERT INTO entries (raw, type, memory_type) VALUES ('x', 'text', 'thought')"
+        ).lastrowid
+        ev_id = conn.execute(
+            "INSERT INTO contact_evidence (contact_id, entry_id, ambiguous_candidate_ids_json) VALUES (NULL, ?, '[1,2]')",
+            (entry_id,),
+        ).lastrowid
+    r = client.post(f"/ui/api/contacts/evidence/{ev_id}/assign", json={"contact_id": target})
+    assert r.status_code == 200
+    with db.get_conn() as conn:
+        ev = conn.execute("SELECT * FROM contact_evidence WHERE id=?", (ev_id,)).fetchone()
+        assert ev["contact_id"] == target
+        assert json.loads(ev["ambiguous_candidate_ids_json"]) == []
+
+
+def test_assign_create_new(db, client):
+    with db.get_conn() as conn:
+        entry_id = conn.execute(
+            "INSERT INTO entries (raw, type, memory_type) VALUES ('x', 'text', 'thought')"
+        ).lastrowid
+        ev_id = conn.execute(
+            "INSERT INTO contact_evidence (contact_id, entry_id) VALUES (NULL, ?)",
+            (entry_id,),
+        ).lastrowid
+    r = client.post(f"/ui/api/contacts/evidence/{ev_id}/assign",
+                    json={"create_new": True, "display_name": "NEW", "relationship_kind": "friend"})
+    assert r.status_code == 200
+    new_cid = r.json()["contact_id"]
+    with db.get_conn() as conn:
+        row = conn.execute("SELECT * FROM contacts WHERE id=?", (new_cid,)).fetchone()
+        assert row["status"] == "confirmed"
+        assert row["relationship_kind"] == "friend"
+        assert row["kind_locked"] == 1
+
+
+def test_dismiss_evidence(db, client):
+    with db.get_conn() as conn:
+        entry_id = conn.execute(
+            "INSERT INTO entries (raw, type, memory_type) VALUES ('x', 'text', 'thought')"
+        ).lastrowid
+        ev_id = conn.execute(
+            "INSERT INTO contact_evidence (contact_id, entry_id) VALUES (NULL, ?)",
+            (entry_id,),
+        ).lastrowid
+    r = client.post(f"/ui/api/contacts/evidence/{ev_id}/dismiss")
+    assert r.status_code == 200
+    with db.get_conn() as conn:
+        gone = conn.execute("SELECT 1 FROM contact_evidence WHERE id=?", (ev_id,)).fetchone()
+        assert gone is None

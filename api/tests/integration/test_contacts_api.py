@@ -278,3 +278,30 @@ def test_dismiss_evidence(db, client):
     with db.get_conn() as conn:
         gone = conn.execute("SELECT 1 FROM contact_evidence WHERE id=?", (ev_id,)).fetchone()
         assert gone is None
+
+
+# ---- T15: DELETE candidate-only ----
+
+def test_delete_candidate_ok(db, client):
+    cid = _seed(db, display_name="A", status="candidate")
+    with db.get_conn() as conn:
+        entry_id = conn.execute(
+            "INSERT INTO entries (raw, type, memory_type) VALUES ('x', 'text', 'thought')"
+        ).lastrowid
+        conn.execute("INSERT INTO contact_evidence (contact_id, entry_id) VALUES (?, ?)", (cid, entry_id))
+    r = client.delete(f"/ui/api/contacts/{cid}")
+    assert r.status_code == 200
+    with db.get_conn() as conn:
+        assert conn.execute("SELECT COUNT(*) c FROM contacts WHERE id=?", (cid,)).fetchone()["c"] == 0
+        assert conn.execute("SELECT COUNT(*) c FROM contact_evidence WHERE contact_id=?", (cid,)).fetchone()["c"] == 0
+
+
+def test_delete_confirmed_409(db, client):
+    cid = _seed(db, display_name="A", status="confirmed")
+    r = client.delete(f"/ui/api/contacts/{cid}")
+    assert r.status_code == 409
+
+
+def test_delete_404(db, client):
+    r = client.delete("/ui/api/contacts/999")
+    assert r.status_code == 404

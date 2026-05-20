@@ -154,3 +154,39 @@ async def test_match_existing_fills_null_kind_when_unlocked(db, entry_factory):
         row = conn.execute("SELECT relationship_kind, kind_locked FROM contacts WHERE id=?", (cid,)).fetchone()
         assert row["relationship_kind"] == "colleague"  # NULL + 未锁 → 填充
         assert row["kind_locked"] == 0                   # 仍未锁（只有用户操作才置锁）
+
+
+@pytest.mark.asyncio
+async def test_ambiguous_writes_evidence_with_null_contact(db, entry_factory):
+    from app.lib import contacts_pipeline
+
+    with db.get_conn() as conn:
+        c1 = conn.execute("INSERT INTO contacts (display_name, status) VALUES ('张三', 'confirmed')").lastrowid
+        c2 = conn.execute("INSERT INTO contacts (display_name, status) VALUES ('张三', 'confirmed')").lastrowid
+
+    entry_id = entry_factory("张三 又联系我了")
+    fake_llm = AsyncMock(return_value={
+        "mentions": [{
+            "verdict": "ambiguous",
+            "matched_contact_id": None,
+            "candidate_contact_ids": [c1, c2],
+            "mention_text": "张三", "excerpt": "张三 又联系我了",
+            "interaction_observed": True,
+            "suggested_display_name": "张三", "suggested_aliases": [],
+            "suggested_kind": None, "context_summary": "", "confidence": 0.5,
+        }],
+    })
+    def emit(*a, **kw): pass
+    with patch.object(contacts_pipeline, "chat_json", new=fake_llm), \
+         patch.object(contacts_pipeline, "is_structured_llm_configured", return_value=True):
+        result = await contacts_pipeline.run_contacts_pipeline(entry_id, "张三 又联系我了", trace={}, emit=emit)
+
+    assert result["candidates_created"] == []
+    assert result["matched_existing"] == []
+    assert len(result["evidence_attached"]) == 1
+
+    with db.get_conn() as conn:
+        ev = conn.execute("SELECT * FROM contact_evidence WHERE entry_id=?", (entry_id,)).fetchone()
+        assert ev["contact_id"] is None
+        assert json.loads(ev["ambiguous_candidate_ids_json"]) == [c1, c2]
+        assert ev["interaction_observed"] == 1

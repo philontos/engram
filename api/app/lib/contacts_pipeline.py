@@ -187,7 +187,8 @@ def _process_mention(entry_id: int, m: dict, known: list[dict], result: dict) ->
         _handle_new_candidate(entry_id, m, result)
     elif verdict == "match_existing":
         _handle_match_existing(entry_id, m, result)
-    # ambiguous: 下一 task
+    elif verdict == "ambiguous":
+        _handle_ambiguous(entry_id, m, result)
 
 
 def _handle_new_candidate(entry_id: int, m: dict, result: dict) -> None:
@@ -290,5 +291,27 @@ def _handle_match_existing(entry_id: int, m: dict, result: dict) -> None:
         evidence_id = ev_cur.lastrowid
 
     result["matched_existing"].append(cid)
+    result["evidence_attached"].append(evidence_id)
+    result["rollback_evidence"].append(evidence_id)
+
+
+def _handle_ambiguous(entry_id: int, m: dict, result: dict) -> None:
+    cand_ids = [c for c in (m.get("candidate_contact_ids") or []) if isinstance(c, int)]
+    interaction = 1 if m.get("interaction_observed") else 0
+    kind = m.get("suggested_kind") if m.get("suggested_kind") in _ALLOWED_KINDS else None
+    with get_conn() as conn:
+        cur = conn.execute(
+            """INSERT INTO contact_evidence
+                 (contact_id, entry_id, mention_text, excerpt, confidence,
+                  suggested_kind, ambiguous_candidate_ids_json, interaction_observed)
+               VALUES (NULL, ?, ?, ?, ?, ?, ?, ?)""",
+            (entry_id,
+             m.get("mention_text") or "",
+             m.get("excerpt") or "",
+             float(m.get("confidence") or 0.0),
+             kind, json.dumps(cand_ids), interaction),
+        )
+        evidence_id = cur.lastrowid
+
     result["evidence_attached"].append(evidence_id)
     result["rollback_evidence"].append(evidence_id)

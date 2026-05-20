@@ -1,21 +1,18 @@
 # Backlog — engram
 
-This file is the handoff point between `/compass` (writes) and `/forge` (reads).
+This file is the handoff point between `/compass` (writes) and `/forge` (reads + executes).
 
-- `/compass` materialize phase **appends** bullets to `## Queued`.
-- `/forge next` **pops** the topmost bullet from `## Queued` and moves it to `## Dispatched` with a timestamp.
+**三段、三态：**
 
-Each bullet describes a feature in 1–3 sentences, concrete enough for the forge spec phase to chew on. Place context, constraints, and "why" inline.
+- `/compass:materialize` **追加** bullets 到 `## Queued`。
+- `/forge next` **整块移动**最顶 bullet 从 `## Queued` 到 `## Dispatched`，加 `*(dispatched <ISO>)*` 注记。
+- `/forge:ship` 在 cycle done 时**整块移动** bullet 从 `## Dispatched` 到 `## Completed`，加 `*(completed <ISO> @ <short-sha>)*` 注记。
+
+**Dispatched ≠ Completed**。Dispatched 表示某 cycle 取走但还没 ship（可能还在跑、blocked、或被放弃）。要重做就**手动**把它从 Dispatched 挪回 Queued。
+
+每条 bullet 描述一个 feature，1-3 句话，具体到 forge spec 阶段能上手。Bullet 整体块格式见 PROTOCOL.md §"Backlog handoff format"。
 
 ## Queued
-
-- 为 engram 加一个 creativity 维度（PHRONOS-style work-cognition 那种思路也行，但范围限定在 engram psychology preset 内）。dimension 包含 backbone prompt + 默认 weight + 测试数据。验证 forge 主链路使用。
-
-- contacts 表 + name resolution / disambiguation 工序（Day-1）
-  goal: 引入熟人 / 关系网独立根。包括 contacts 表、name resolution / disambiguation 工序、relationship_kind 用户可覆盖机制。是 forebodes 的 anchor 依赖。
-  scope: in: 新 contacts 表 + 初始 LLM 工序 + 用户确认 / 合并 UI; out: 关系互动账走 derived view 实现，不本次。
-  relevant_code: api/app/lib/db.py, api/app/lib/ (new contacts module), web/ (确认/合并 UI)
-  origin: compass-cycle 2026-05-18-first-principles-rethink / ADR-010
 
 - Router 重构：entry_signals 表 + router prompt + 下游消费改造
   goal: 把 intent gate 二态准入替换为 router 多 lens × effort 强度提取。Lens 枚举：cognitive / outcome / retrospective / method_in_use / intent_express / relationship_event。
@@ -23,11 +20,11 @@ Each bullet describes a feature in 1–3 sentences, concrete enough for the forg
   relevant_code: api/app/lib/intent_gate.py, api/app/lib/db.py, api/app/lib/slice_pipeline.py, api/app/lib/backbone_pipeline.py
   origin: compass-cycle 2026-05-18-first-principles-rethink / ADR-009
 
-- Forebodes 表 + 状态机 + extract/close pipeline + decay job
-  goal: 引入伏笔 / 承诺独立根。状态机：active / revisited / fulfilled / abandoned / decayed。
-  scope: in: 新 forebodes 表 + forebode_extract（消费 intent_express signal）+ forebode_close（每条新 entry 对 active 做相关性匹配）+ decay 定时 job; out: 关系互动账（走 derived view）不本次。
-  relevant_code: api/app/lib/db.py, api/app/lib/ (new forebode module)
-  origin: compass-cycle 2026-05-18-first-principles-rethink / ADR-010
+- Open_loops 表 + 状态机 + extract/close pipeline + decay job
+  goal: 引入"伏笔 / 承诺"独立根（中文沿用"伏笔"叙事学比喻；英文表名弃 forebode 改用 open_loop，避免 "ominous" 负面含义）。状态机：active / revisited / fulfilled / abandoned / decayed。
+  scope: in: 新 open_loops 表 + open_loop_extract（消费 intent_express signal）+ open_loop_close（每条新 entry 对 active 做相关性匹配）+ decay 定时 job; out: 关系互动账（走 derived view）不本次。
+  relevant_code: api/app/lib/db.py, api/app/lib/ (new open_loop module)
+  origin: compass-cycle 2026-05-18-first-principles-rethink / ADR-010 (rename adopted in forge cycle 2026-05-20-contacts-name-resolution-disambiguation)
 
 - Method_cases 表 + extract/outcome_backfill pipeline
   goal: 引入方法论 case 库。case = "在情境 S 调用了方法 M，结果 O"；outcome 回灌驱动。
@@ -73,4 +70,14 @@ Each bullet describes a feature in 1–3 sentences, concrete enough for the forg
 
 ## Dispatched
 
-<!-- 取走的条目移动到这里，附带时间戳 -->
+<!-- /forge next 取走的条目移动到这里，附带 *(dispatched <ISO>)* 注记 -->
+
+## Completed
+
+<!-- /forge:ship 完成后从 Dispatched 移过来，附带 *(completed <ISO> @ <short-sha>)* 注记 -->
+
+- contacts 表 + name resolution / disambiguation 工序（Day-1）  *(completed 2026-05-20T11:12:48Z @ 97f9287)*
+  goal: 引入熟人 / 关系网独立根。包括 contacts 表、name resolution / disambiguation 工序、relationship_kind 用户可覆盖机制。是 forebodes 的 anchor 依赖。
+  scope: in: 新 contacts 表 + 初始 LLM 工序 + 用户确认 / 合并 UI; out: 关系互动账走 derived view 实现，不本次。
+  relevant_code: api/app/lib/db.py, api/app/lib/ (new contacts module), web/ (确认/合并 UI)
+  origin: compass-cycle 2026-05-18-first-principles-rethink / ADR-010

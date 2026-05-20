@@ -221,3 +221,27 @@ async def test_new_candidate_demoted_when_name_already_exists(db, entry_factory)
     with db.get_conn() as conn:
         n = conn.execute("SELECT COUNT(*) c FROM contacts").fetchone()["c"]
         assert n == 1   # 没创建第二条
+
+
+def test_truncate_by_recency_keeps_top_k(db):
+    """200 个 contacts → 截到 100 个，按 recency + evidence_count 打分。"""
+    from app.lib import contacts_pipeline
+    from datetime import datetime, timezone, timedelta
+
+    now = datetime.now(timezone.utc)
+    items = []
+    with db.get_conn() as conn:
+        for i in range(200):
+            iso = (now - timedelta(days=i)).isoformat(sep=" ")
+            cur = conn.execute(
+                "INSERT INTO contacts (display_name, status, last_interaction_at) VALUES (?, 'confirmed', ?)",
+                (f"P{i}", iso),
+            )
+            items.append({"id": cur.lastrowid, "display_name": f"P{i}",
+                          "aliases_json": "[]", "relationship_kind": None, "status": "confirmed",
+                          "last_interaction_at": iso, "last_seen_entry_id": None})
+
+    truncated = contacts_pipeline._truncate_by_recency(items, 100)
+    assert len(truncated) == 100
+    # 最新（P0、P1...）应靠前
+    assert truncated[0]["display_name"] == "P0"

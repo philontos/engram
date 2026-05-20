@@ -7,14 +7,15 @@ import { EntriesTab } from '@/components/entries/EntriesTab'
 import { ProfileTab } from '@/components/profile/ProfileTab'
 import { QueryTab }   from '@/components/query/QueryTab'
 import { PipelineTab } from '@/components/pipeline/PipelineTab'
-import { Network, BookOpen, UserCircle2, Search, Settings, Download, Upload, Zap, Trash2, AlertTriangle, X, Activity } from 'lucide-react'
+import { Network, BookOpen, UserCircle2, Search, Settings, Download, Upload, Zap, Trash2, AlertTriangle, X, Activity, Users } from 'lucide-react'
+import { ContactsTab } from './components/contacts/ContactsTab'
 import { useConfirm } from '@/components/ui/ConfirmDialog'
 import { useI18n, type TKey } from '@/i18n'
 import { LangSwitcher } from '@/components/ui/LangSwitcher'
 import { ThemeToggle } from '@/components/ui/ThemeToggle'
 import { Logo } from '@/components/ui/Logo'
 
-type Tab = 'graph' | 'entries' | 'profile' | 'query' | 'pipeline'
+type Tab = 'graph' | 'entries' | 'profile' | 'query' | 'pipeline' | 'contacts'
 
 const TABS: { id: Tab; labelKey: TKey; Icon: React.ElementType }[] = [
   { id: 'query',    labelKey: 'nav.query',    Icon: Search      },
@@ -22,6 +23,7 @@ const TABS: { id: Tab; labelKey: TKey; Icon: React.ElementType }[] = [
   { id: 'entries',  labelKey: 'nav.entries',  Icon: BookOpen    },
   { id: 'graph',    labelKey: 'nav.graph',    Icon: Network     },
   { id: 'pipeline', labelKey: 'nav.pipeline', Icon: Activity    },
+  { id: 'contacts', labelKey: 'nav.contacts', Icon: Users       },
 ]
 
 export default function App() {
@@ -248,6 +250,7 @@ export default function App() {
           <div className={tab === 'profile'  ? 'h-full' : 'hidden'}><ProfileTab /></div>
           <div className={tab === 'query'    ? 'h-full' : 'hidden'}><QueryTab active={tab === 'query'} /></div>
           <div className={tab === 'pipeline' ? 'h-full' : 'hidden'}><PipelineTab /></div>
+          <div className={tab === 'contacts' ? 'h-full' : 'hidden'}><ContactsTab /></div>
         </div>
       </div>
     </div>

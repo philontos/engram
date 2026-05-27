@@ -1,6 +1,7 @@
 """End-to-end: trigger pipeline and verify the SSE event stream contains
 all the expected fine-grained stage events with summaries and payloads."""
 
+import contextlib
 import pytest
 from unittest.mock import AsyncMock, patch
 
@@ -26,27 +27,35 @@ async def test_full_pipeline_emits_fine_grained_events(db):
                     "pressure_level": "low", "energy_level": "medium"}
         return {"a": {"score": 60, "confidence": 0.7, "evidence": "x"}}
 
-    with patch("app.lib.slice_pipeline._extract_dimension", new=fake_extract_dim), \
-         patch("app.lib.slice_pipeline.is_structured_llm_configured", return_value=True), \
-         patch("app.lib.slice_pipeline.get_profile_summary", return_value=""), \
-         patch("app.lib.slice_pipeline.merge_dimension", lambda *a, **kw: None), \
-         patch("app.lib.backbone_pipeline.is_structured_llm_configured", return_value=True), \
-         patch("app.lib.backbone_pipeline.get_profile_summary", return_value=""), \
-         patch("app.lib.backbone_pipeline.get_slice_summary", return_value=""), \
-         patch("app.lib.backbone_pipeline.get_situation_context", return_value=""), \
-         patch("app.lib.backbone_pipeline._activate_backbones", new=AsyncMock(return_value={"psychology": 0.7})), \
-         patch("app.lib.backbone_pipeline.embed", new=AsyncMock(return_value=[0.0] * 16)), \
-         patch("app.lib.backbone_pipeline._rough_retrieval", return_value=[]), \
-         patch("app.lib.backbone_pipeline._extract_internal_candidates", new=AsyncMock(return_value=[])), \
-         patch("app.lib.backbone_pipeline._extract_external_candidates", new=AsyncMock(return_value=[])), \
-         patch("app.lib.backbone_pipeline._resolve_nodes", new=AsyncMock(return_value=([], {}, 0, {"new": [], "updated": []}, []))), \
-         patch("app.lib.backbone_pipeline._precise_retrieval", return_value={"nodes": [], "edges": [], "seed_meta": {}}), \
-         patch("app.lib.backbone_pipeline._write_algo_similarity_edges", return_value=([], [], [])), \
-         patch("app.lib.backbone_pipeline._extract_and_persist_edges", new=AsyncMock(return_value=(0, [], [], []))), \
-         patch("app.lib.backbone_pipeline._write_association_edges", return_value=([], [], [])), \
-         patch("app.lib.backbone_pipeline._propagate_opposition_edges", return_value=([], [])), \
-         patch("app.lib.backbone_pipeline._write_activations", lambda *a, **kw: None):
-
+    # Use ExitStack to avoid Python 3.11 "too many statically nested blocks" limit
+    # when patching many symbols at once.
+    patches = [
+        patch("app.routes.process_entry.route", new=AsyncMock(return_value=[
+            {"lens": "cognitive", "effort": 0.9, "span": "x", "payload": {}}])),
+        patch("app.lib.slice_pipeline._extract_dimension", new=fake_extract_dim),
+        patch("app.lib.slice_pipeline.is_structured_llm_configured", return_value=True),
+        patch("app.lib.slice_pipeline.get_profile_summary", return_value=""),
+        patch("app.lib.slice_pipeline.merge_dimension", lambda *a, **kw: None),
+        patch("app.lib.backbone_pipeline.is_structured_llm_configured", return_value=True),
+        patch("app.lib.backbone_pipeline.get_profile_summary", return_value=""),
+        patch("app.lib.backbone_pipeline.get_slice_summary", return_value=""),
+        patch("app.lib.backbone_pipeline.get_situation_context", return_value=""),
+        patch("app.lib.backbone_pipeline._activate_backbones", new=AsyncMock(return_value={"psychology": 0.7})),
+        patch("app.lib.backbone_pipeline.embed", new=AsyncMock(return_value=[0.0] * 16)),
+        patch("app.lib.backbone_pipeline._rough_retrieval", return_value=[]),
+        patch("app.lib.backbone_pipeline._extract_internal_candidates", new=AsyncMock(return_value=[])),
+        patch("app.lib.backbone_pipeline._extract_external_candidates", new=AsyncMock(return_value=[])),
+        patch("app.lib.backbone_pipeline._resolve_nodes", new=AsyncMock(return_value=([], {}, 0, {"new": [], "updated": []}, []))),
+        patch("app.lib.backbone_pipeline._precise_retrieval", return_value={"nodes": [], "edges": [], "seed_meta": {}}),
+        patch("app.lib.backbone_pipeline._write_algo_similarity_edges", return_value=([], [], [])),
+        patch("app.lib.backbone_pipeline._extract_and_persist_edges", new=AsyncMock(return_value=(0, [], [], []))),
+        patch("app.lib.backbone_pipeline._write_association_edges", return_value=([], [], [])),
+        patch("app.lib.backbone_pipeline._propagate_opposition_edges", return_value=([], [])),
+        patch("app.lib.backbone_pipeline._write_activations", lambda *a, **kw: None),
+    ]
+    with contextlib.ExitStack() as stack:
+        for p in patches:
+            stack.enter_context(p)
         await _run_pipeline(entry_id, row)
 
     events = process_events._channels[entry_id].events
@@ -63,3 +72,11 @@ async def test_full_pipeline_emits_fine_grained_events(db):
             continue
         assert "summary" in e, f"{e['stage']} missing summary"
         assert "payload" in e, f"{e['stage']} missing payload"
+
+    assert "router" in stage_names  # router done event present even on cognitive path
+
+    with db.get_conn() as conn:
+        status = conn.execute(
+            "SELECT processing_status FROM entries WHERE id=?", (entry_id,)
+        ).fetchone()["processing_status"]
+    assert status == "processed"

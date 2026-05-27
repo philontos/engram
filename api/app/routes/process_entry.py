@@ -12,6 +12,8 @@ from pydantic import BaseModel
 from app.lib.backbone_pipeline import run_backbone_pipeline
 from app.lib.db import get_conn
 from app.lib import process_events
+from app.lib.entry_signals import get_cognitive, persist
+from app.lib.router import route
 from app.lib.slice_pipeline import generate_slice
 from shared.llm import capture_llm_calls
 
@@ -239,32 +241,54 @@ async def _run_pipeline(entry_id: int, row) -> ProcessResult:
     slice_id: int | None = None
     backbone_stats: dict = {}
     error_payload: dict | None = None
+    router_skipped = False
     try:
         with capture_llm_calls(llm_calls):
-            # generate_slice emits its own slice:* sub-stage events
-            profile_before = _snapshot_profile()
-            slice_id = await generate_slice(entry_id, raw, trace=trace, emit=emit)
-            profile_after = _snapshot_profile()
+            # Router: tag the entry with lenses + effort, persist signals, and
+            # delegate admission downstream. The router never rejects.
+            emit("router", "start")
+            signals = await route(raw)
+            persist(entry_id, signals)
+            trace["router"] = signals
+            emit("router", "done",
+                 summary=f"{len(signals)} signal(s)",
+                 payload={"signals": signals})
 
-            if slice_id:
-                trace["slice"] = _get_slice_features(slice_id)
-                trace["profile_diff"] = _calc_profile_diff(profile_before, profile_after)
-                _save_profile_snapshot(entry_id)
-
-                # run_backbone_pipeline emits its own per-sub-stage events
-                backbone_stats = await run_backbone_pipeline(
-                    entry_id, slice_id, raw, trace=trace, entry_dt=entry_dt, emit=emit,
-                )
+            # Cognitive gate: slice + backbone run iff this entry has a cognitive
+            # signal above the threshold. Otherwise skip cleanly — the router ran
+            # and stored signals; there is just nothing cognitive to model.
+            if not get_cognitive(entry_id):
+                router_skipped = True
+                emit("slice", "skipped", reason="no_cognitive_signal")
                 with get_conn() as conn:
                     conn.execute(
                         "UPDATE entries SET processing_status='processed' WHERE id=?", (entry_id,)
                     )
             else:
-                with get_conn() as conn:
-                    conn.execute(
-                        "UPDATE entries SET processing_status='slice_failed' WHERE id=?", (entry_id,)
+                # generate_slice emits its own slice:* sub-stage events
+                profile_before = _snapshot_profile()
+                slice_id = await generate_slice(entry_id, raw, trace=trace, emit=emit)
+                profile_after = _snapshot_profile()
+
+                if slice_id:
+                    trace["slice"] = _get_slice_features(slice_id)
+                    trace["profile_diff"] = _calc_profile_diff(profile_before, profile_after)
+                    _save_profile_snapshot(entry_id)
+
+                    # run_backbone_pipeline emits its own per-sub-stage events
+                    backbone_stats = await run_backbone_pipeline(
+                        entry_id, slice_id, raw, trace=trace, entry_dt=entry_dt, emit=emit,
                     )
-                emit("slice", "skipped", reason="slice_generation_failed")
+                    with get_conn() as conn:
+                        conn.execute(
+                            "UPDATE entries SET processing_status='processed' WHERE id=?", (entry_id,)
+                        )
+                else:
+                    with get_conn() as conn:
+                        conn.execute(
+                            "UPDATE entries SET processing_status='slice_failed' WHERE id=?", (entry_id,)
+                        )
+                    emit("slice", "skipped", reason="slice_generation_failed")
     except Exception as exc:
         error_payload = {"message": str(exc), "type": exc.__class__.__name__}
         emit("pipeline", "error", **error_payload)
@@ -289,7 +313,12 @@ async def _run_pipeline(entry_id: int, row) -> ProcessResult:
 
     _save_trace(entry_id, trace, rollback)
 
-    final_status = "failed" if error_payload else ("done" if slice_id else "slice_failed")
+    final_status = (
+        "failed" if error_payload
+        else "skipped" if router_skipped
+        else "done" if slice_id
+        else "slice_failed"
+    )
     emit("pipeline", "done",
          final_status=final_status,
          duration_ms=trace["duration_ms"],

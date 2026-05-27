@@ -33,6 +33,21 @@ def init_db():
                 processing_status TEXT DEFAULT 'captured'
             );
 
+            -- 采集层信号：router 产出（L0 entries → 本表 → 下游各根按 effort 阈值消费）
+            CREATE TABLE IF NOT EXISTS entry_signals (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                entry_id     INTEGER NOT NULL REFERENCES entries(id),
+                lens         TEXT NOT NULL,                 -- content_type enum (see router.LENSES)
+                span_start   INTEGER,                       -- hit span offsets in entries.raw (nullable)
+                span_end     INTEGER,
+                span_text    TEXT,                          -- hit span text (nullable)
+                effort       REAL NOT NULL DEFAULT 0.0,     -- 0-1 strength
+                payload_json TEXT,                          -- lens-specific structured payload (nullable)
+                created_at   DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+            CREATE INDEX IF NOT EXISTS idx_entry_signals_entry ON entry_signals(entry_id);
+            CREATE INDEX IF NOT EXISTS idx_entry_signals_lens  ON entry_signals(lens);
+
             -- 第 1 层：人格切片（per-entry，永久不可变）
             CREATE TABLE IF NOT EXISTS slices (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,

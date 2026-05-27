@@ -34,11 +34,13 @@ def _indexes(db, table: str) -> set[str]:
 # ── 表存在性 ─────────────────────────────────────────────────────────────────
 
 def test_all_core_tables_exist(db):
+    # memos + capture_buffer were dropped by migration 002_drop_memo_buffer.sql
+    # and are intentionally no longer created by init_db().
     expected = {
-        "entries", "slices", "slice_features", "profile_dimensions",
-        "backbone_nodes", "backbone_edges", "backbone_activations",
-        "profile_snapshots", "pipeline_traces", "query_logs",
-        "memos", "capture_buffer",
+        "entries", "entry_signals", "slices", "slice_features",
+        "profile_dimensions", "backbone_nodes", "backbone_edges",
+        "backbone_activations", "profile_snapshots", "pipeline_traces",
+        "query_logs",
     }
     assert expected <= _tables(db)
 
@@ -159,3 +161,35 @@ def test_key_indexes_exist(db):
     assert "idx_backbone_nodes_strength" in _indexes(db, "backbone_nodes")
     assert "idx_backbone_edges_from" in _indexes(db, "backbone_edges")
     assert "idx_slice_features_dimension" in _indexes(db, "slice_features")
+
+
+# ── entry_signals (router output, L0 entries → signals → downstream) ──────────
+
+def test_entry_signals_columns(db):
+    cols = _columns(db, "entry_signals")
+    for c in ["id", "entry_id", "lens", "span_start", "span_end",
+              "span_text", "effort", "payload_json", "created_at"]:
+        assert c in cols, f"missing column: {c}"
+
+
+def test_entry_signals_indexes_exist(db):
+    idx = _indexes(db, "entry_signals")
+    assert "idx_entry_signals_entry" in idx
+    assert "idx_entry_signals_lens" in idx
+
+
+def test_entry_signals_insert_and_read(db):
+    with db.get_conn() as conn:
+        cur = conn.execute("INSERT INTO entries (type, raw) VALUES ('text', 'x')")
+        entry_id = cur.lastrowid
+        conn.execute(
+            "INSERT INTO entry_signals (entry_id, lens, effort) VALUES (?, 'cognitive', 0.8)",
+            (entry_id,),
+        )
+        row = conn.execute(
+            "SELECT * FROM entry_signals WHERE entry_id=?", (entry_id,)
+        ).fetchone()
+    assert row["lens"] == "cognitive"
+    assert row["effort"] == 0.8
+    assert row["span_start"] is None      # nullable offsets default to NULL
+    assert row["payload_json"] is None

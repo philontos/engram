@@ -1,9 +1,9 @@
 """POST /capture — write a single thought / reflection.
 
-Engram is a cognitive capture system. Inputs that are pure event logs or
-reminders are rejected by the intent gate; only reflections become entries.
-The slice + backbone pipeline is triggered automatically in the background
-once an entry is created.
+Engram is a cognitive capture system. Every capture becomes an entry — the
+router (run in the background pipeline) tags it with lenses + effort and
+delegates downstream admission; nothing is rejected at capture time. The
+slice + backbone pipeline is triggered automatically once an entry is created.
 """
 
 import asyncio
@@ -17,7 +17,6 @@ from pydantic import BaseModel
 from app.lib import process_events
 from app.lib.db import get_conn
 from app.lib.embed import embed
-from app.lib.intent_gate import classify
 from app.lib.vector_store import get_store
 
 router = APIRouter()
@@ -35,8 +34,8 @@ class CaptureRequest(BaseModel):
 
 
 class CaptureResponse(BaseModel):
-    track: str          # "entry" | "reject"
-    id: int | None      # entry_id when track == "entry"
+    track: str          # always "entry" (shape kept for backward compat)
+    id: int | None      # entry_id (always set)
     reason: str = ""
 
 
@@ -99,15 +98,10 @@ async def capture(req: CaptureRequest):
     if not content:
         raise HTTPException(status_code=400, detail="content is empty.")
 
-    intent = await classify(content)
-    track = intent["track"]
-    reason = intent.get("reason", "")
-
-    if track == "reject":
-        return CaptureResponse(track="reject", id=None, reason=reason)
-
+    # Router never rejects — always create the entry; admission is delegated to
+    # the background pipeline (cognitive gate) and downstream consumers.
     metadata = _build_metadata(req)
     entry_id = await _create_entry(content, req, metadata=metadata)
     process_events.init(entry_id)
     asyncio.create_task(_trigger_process(entry_id))
-    return CaptureResponse(track="entry", id=entry_id, reason=reason)
+    return CaptureResponse(track="entry", id=entry_id, reason="")
